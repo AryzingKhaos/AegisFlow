@@ -69,6 +69,19 @@ AegisFlow 的目标是面向真实软件开发工作的 Agentic Dev Workflow Sys
 - `Runtime` 在任务恢复时必须重新创建
 - 本期范围只覆盖 `v0.1`，支持 `Feature Change`、`Bugfix`、`Small New Feature`
 
+## 用户补充约束
+
+以下内容由用户后续明确追加，在本文中视为已确认需求约束：
+
+- `IntakeAgent` 当前模型接入约束为使用 `import { ChatOpenAI } from "@langchain/openai"`
+- 当前默认模型配置为：
+  - `model = gpt5.4`
+  - `base_url = https://co.yes.vg/v1`
+  - `apiKey = process.env.OPENAI_API_KEY`
+- 本期交付结果必须包含一个可直接测试和验收的 `Intake` 层成品，而不是仅交付底层模块或半成品文档
+- 若 `Runtime` 某些初始化能力在本期暂时无法完整落地，可以采用带注释的受控占位实现过渡，但不能导致 CLI 入口不可启动
+- `IntakeAgent` 对超出本期范围的请求统一回复“敬请期待”
+
 ## 需求总览
 
 ```mermaid
@@ -133,6 +146,16 @@ flowchart TD
 - `IntakeAgent` 在本期必须以自然语言交互为主。
 - 当用户只提供需求描述时，`IntakeAgent` 必须根据描述推测用户意图，并以确认式问句与用户校对。
 - 当 `IntakeAgent` 完成初步判断后，必须告知用户识别出的需求类型以及所选择的 `workflow`。
+- 当用户提出超出本期范围的请求时，`IntakeAgent` 必须统一回复“敬请期待”。
+
+### FR-1A IntakeAgent 模型接入约束
+
+- `IntakeAgent` 当前必须基于 `@langchain/openai` 的 `ChatOpenAI` 接入模型能力。
+- 当前默认模型配置必须为：
+  - `model = gpt5.4`
+  - `base_url = https://co.yes.vg/v1`
+  - `apiKey = process.env.OPENAI_API_KEY`
+- 本文将上述内容视为当前版本的已确认接入约束，而不是开放性实现选项。
 
 ### FR-2 补齐 Runtime 初始化资料
 
@@ -155,6 +178,7 @@ flowchart TD
   - `ArtifactManager`
   - `RoleRegistry`
 - 当用户执行恢复未完成任务时，`IntakeAgent` 必须重新创建 `Runtime`，不能复用旧内存实例。
+- 若 `Runtime` 的部分初始化能力在本期暂时无法完整落地，可以使用带注释的受控占位实现过渡，但不能影响 CLI 入口启动和基础 `Intake` 交互执行。
 
 ### FR-4 创建与启动任务
 
@@ -240,6 +264,12 @@ flowchart TD
   - `TaskState` 是任务状态载体，但其合法修改者是 `WorkflowController`
   - `ProjectConfig` 为 `Runtime` 初始化提供配置上下文
 
+### FR-12 交付与验收约束
+
+- 本期最终交付物必须包含一个可直接测试和验收的 `Intake` 层成品。
+- 交付结果不能只包含底层模块、接口定义、计划文档或无法独立启动的半成品。
+- 即使部分 `Runtime` 能力采用受控占位实现，CLI 入口仍必须可启动，且基础 `Intake` 交互必须可执行。
+
 ## 关键对象关系
 
 ```mermaid
@@ -276,12 +306,16 @@ flowchart LR
 - 所有需求描述以 CLI 用户交互为中心，不包含图形界面要求
 - 文档中的对象名、事件名、状态名、路径名必须与 `project.md` 中现有命名保持一致
 - 本文只描述需求，不展开类设计、接口实现、代码目录和工程实现策略
+- 当前模型接入约束固定为 `ChatOpenAI` + `gpt5.4` + `https://co.yes.vg/v1` + `process.env.OPENAI_API_KEY`
+- 对超出本期范围的请求，`IntakeAgent` 的统一响应为“敬请期待”
+- 若存在受控占位实现，不得牺牲 CLI 入口可启动性和基础交互可执行性
 
 ## Acceptance
 
 - CLI 用户可以直接输入自然语言需求并触发 `IntakeAgent` 进入澄清与初始化流程
 - 在资料不足时，`IntakeAgent` 会继续追问，直至满足 `Runtime` 初始化前提
 - `IntakeAgent` 会向用户明确展示识别出的需求类型和所选 `workflow`
+- `IntakeAgent` 当前基于 `ChatOpenAI` 接入，且默认模型配置符合 `gpt5.4`、`https://co.yes.vg/v1`、`process.env.OPENAI_API_KEY`
 - `IntakeAgent` 可以初始化 `Runtime` 所需的核心对象集合
 - `IntakeAgent` 可以创建任务、启动任务、取消任务、中断任务、恢复任务，并支持补充任务内容
 - `创建任务` 与 `开始任务` 可以在满足条件时连续完成
@@ -292,6 +326,8 @@ flowchart LR
 - 恢复未完成任务时，系统会重新创建 `Runtime`
 - 普通补充说明默认进入 `participate`，只有明确“继续执行”语义时才进入 `resume_task`
 - `taskId` 由 `IntakeAgent` 决定和生成
+- 对超出本期范围的请求，`IntakeAgent` 统一回复“敬请期待”
+- 即使存在受控占位实现，CLI 入口仍可启动，且基础 `Intake` 交互可执行
 - `Intake` 的职责仍停留在入口交互与轻决策层，不承担工作流编排职责
 
 ## Risks
