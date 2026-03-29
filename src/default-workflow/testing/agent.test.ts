@@ -42,6 +42,7 @@ describe("IntakeAgent", () => {
     const firstAgent = new IntakeAgent(root);
     await firstAgent.handleUserInput("修复登录报错");
     await firstAgent.handleUserInput("y");
+    await firstAgent.handleUserInput("y");
     await firstAgent.handleUserInput(projectDir);
     const startLines = await firstAgent.handleUserInput(artifactDir);
     const interruptResult = await firstAgent.handleInterruptSignal();
@@ -66,6 +67,7 @@ describe("IntakeAgent", () => {
 
     await agent.handleUserInput("修复登录报错");
     await agent.handleUserInput("y");
+    await agent.handleUserInput("y");
     await agent.handleUserInput(projectDir);
     const lines = await agent.handleUserInput("");
 
@@ -74,5 +76,18 @@ describe("IntakeAgent", () => {
     expect(rendered).toContain("taskId=");
     expect(rendered).toContain("timestamp=");
     expect(rendered).toContain("TaskState 摘要：");
+  });
+
+  it("collects workflow orchestration before runtime initialization", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "aegisflow-agent-"));
+    tempDirs.push(root);
+    const agent = new IntakeAgent(root);
+
+    await agent.handleUserInput("修复登录报错");
+    const lines = await agent.handleUserInput("y");
+
+    expect(lines).toEqual([
+      "当前 workflow 编排将使用 default-workflow/v0.1：clarify -> explore -> plan -> build -> critic -> test_design -> test。是否确认？请回答 yes/no。",
+    ]);
   });
 });

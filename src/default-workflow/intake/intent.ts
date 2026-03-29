@@ -1,6 +1,9 @@
 import {
   CANCEL_HINT_PATTERNS,
   OUT_OF_SCOPE_PATTERNS,
+  OUT_OF_SCOPE_DIRECTIVE_PATTERNS,
+  OUT_OF_SCOPE_PHASE_PATTERNS,
+  OUT_OF_SCOPE_ROLE_PATTERNS,
   RESUME_HINT_PATTERNS,
   SUPPORTED_WORKFLOW_TYPES,
 } from "../shared/constants";
@@ -86,7 +89,7 @@ export function normalizeUserIntent(
 ): NormalizedIntent {
   const normalizedMessage = input.trim();
 
-  if (OUT_OF_SCOPE_PATTERNS.some((pattern) => pattern.test(normalizedMessage))) {
+  if (isOutOfScopeRequest(normalizedMessage, hasActiveTask)) {
     return {
       type: "out_of_scope",
       confidence: "high",
@@ -131,6 +134,39 @@ export function normalizeUserIntent(
 export function describeWorkflowGuess(taskType: WorkflowTaskType): string {
   const definition = SUPPORTED_WORKFLOW_TYPES[taskType];
   return `${definition.label}：${definition.description}`;
+}
+
+export function isOutOfScopeRequest(
+  input: string,
+  hasActiveTask: boolean,
+): boolean {
+  if (OUT_OF_SCOPE_PATTERNS.some((pattern) => pattern.test(input))) {
+    return true;
+  }
+
+  const hasRoleReference = OUT_OF_SCOPE_ROLE_PATTERNS.some((pattern) =>
+    pattern.test(input),
+  );
+  const hasPhaseReference = OUT_OF_SCOPE_PHASE_PATTERNS.some((pattern) =>
+    pattern.test(input),
+  );
+  const hasDirective = OUT_OF_SCOPE_DIRECTIVE_PATTERNS.some((pattern) =>
+    pattern.test(input),
+  );
+
+  if ((hasRoleReference || hasPhaseReference) && hasDirective) {
+    return true;
+  }
+
+  if (
+    hasActiveTask &&
+    (/(进入|切到|切换到).*(clarify|explore|plan|build|critic|test)/i.test(input) ||
+      /(进入|切到|切换到).*(澄清|探索|规划|实现|评审|测试)/.test(input))
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
 function scorePatterns(input: string, patterns: RegExp[]): number {

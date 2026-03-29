@@ -13,6 +13,7 @@ import type {
   PersistedTaskContext,
   ProjectConfig,
   Runtime,
+  WorkflowOrchestration,
   WorkflowSelection,
 } from "../shared/types";
 import { JsonlEventLogger, StaticRoleRegistry } from "./dependencies";
@@ -22,6 +23,7 @@ export interface BuildNewRuntimeInput {
   projectDir: string;
   artifactDir: string;
   workflow: WorkflowSelection;
+  orchestration: WorkflowOrchestration;
   description: string;
 }
 
@@ -39,7 +41,12 @@ export interface RuntimeBuildResult {
 export async function buildRuntimeForNewTask(
   input: BuildNewRuntimeInput,
 ): Promise<RuntimeBuildResult> {
-  await validateRuntimeInput(input.projectDir, input.artifactDir, input.workflow);
+  await validateRuntimeInput(
+    input.projectDir,
+    input.artifactDir,
+    input.workflow,
+    input.orchestration,
+  );
 
   // Runtime 装配顺序遵循实现计划：先配置，再基础设施，最后控制器。
   const runtimeId = createRuntimeId();
@@ -52,6 +59,7 @@ export async function buildRuntimeForNewTask(
     projectDir: input.projectDir,
     artifactDir: input.artifactDir,
     workflow: input.workflow,
+    orchestration: input.orchestration,
   });
   const eventEmitter = new EventEmitter();
   const eventLogger = new JsonlEventLogger(
@@ -108,6 +116,7 @@ export async function buildRuntimeForResume(
     input.projectConfig.projectDir,
     input.projectConfig.artifactDir,
     input.projectConfig.workflow,
+    input.projectConfig.orchestration,
   );
 
   // 恢复时始终基于持久化工件重建全新的 Runtime，
@@ -197,6 +206,7 @@ async function validateRuntimeInput(
   projectDir: string,
   artifactDir: string,
   workflow: WorkflowSelection,
+  orchestration?: WorkflowOrchestration,
 ): Promise<void> {
   const resolvedProjectDir = path.resolve(projectDir);
   const resolvedArtifactDir = path.resolve(artifactDir);
@@ -211,6 +221,10 @@ async function validateRuntimeInput(
     throw new Error("Workflow configuration is missing or invalid.");
   }
 
+  if (!orchestration?.profileId || orchestration.phases.length === 0) {
+    throw new Error("Workflow orchestration is missing or invalid.");
+  }
+
   // 校验阶段允许预先创建工件目录，因为任务启动前必须确认该路径可写。
   await fs.mkdir(resolvedArtifactDir, { recursive: true });
 }
@@ -223,6 +237,21 @@ function createArtifactLookupProjectConfig(artifactDir: string): ProjectConfig {
       id: "default-workflow",
       taskType: "feature_change",
       label: "Feature Change",
+    },
+    orchestration: {
+      profileId: "default-v0.1",
+      label: "default-workflow/v0.1",
+      phases: [
+        "clarify",
+        "explore",
+        "plan",
+        "build",
+        "critic",
+        "test_design",
+        "test",
+      ],
+      resumePolicy: "rebuild_runtime",
+      approvalMode: "human_in_the_loop",
     },
   });
 }

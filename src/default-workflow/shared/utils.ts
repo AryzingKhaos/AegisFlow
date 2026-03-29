@@ -2,11 +2,15 @@ import path from "node:path";
 import {
   DEFAULT_ARTIFACT_DIR_NAME,
   DEFAULT_WORKFLOW_ID,
+  DEFAULT_WORKFLOW_ORCHESTRATION_PHASES,
+  DEFAULT_WORKFLOW_ORCHESTRATION_PROFILE_ID,
   SUPPORTED_WORKFLOW_TYPES,
 } from "./constants";
 import type {
+  Phase,
   ProjectConfig,
   TaskState,
+  WorkflowOrchestration,
   WorkflowSelection,
   WorkflowTaskType,
 } from "./types";
@@ -60,6 +64,20 @@ export function createWorkflowSelection(
   };
 }
 
+export function createDefaultWorkflowOrchestration(): WorkflowOrchestration {
+  return {
+    profileId: DEFAULT_WORKFLOW_ORCHESTRATION_PROFILE_ID,
+    label: "default-workflow/v0.1",
+    phases: [...DEFAULT_WORKFLOW_ORCHESTRATION_PHASES],
+    resumePolicy: "rebuild_runtime",
+    approvalMode: "human_in_the_loop",
+  };
+}
+
+export function formatOrchestrationPhases(phases: Phase[]): string {
+  return phases.join(" -> ");
+}
+
 export function createInitialTaskState(taskId: string, title: string): TaskState {
   return {
     taskId,
@@ -86,11 +104,16 @@ export function createProjectConfig(input: {
   projectDir: string;
   artifactDir: string;
   workflow: WorkflowSelection;
+  orchestration: WorkflowOrchestration;
 }): ProjectConfig {
   return {
     projectDir: path.resolve(input.projectDir),
     artifactDir: path.resolve(input.artifactDir),
     workflow: input.workflow,
+    orchestration: {
+      ...input.orchestration,
+      phases: [...input.orchestration.phases],
+    },
   };
 }
 

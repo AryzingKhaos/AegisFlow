@@ -7,7 +7,10 @@ import {
   buildRuntimeForResume,
 } from "../runtime/builder";
 import { TaskStatus } from "../shared/types";
-import { createWorkflowSelection } from "../shared/utils";
+import {
+  createDefaultWorkflowOrchestration,
+  createWorkflowSelection,
+} from "../shared/utils";
 
 const tempDirs: string[] = [];
 
@@ -31,6 +34,7 @@ describe("runtime builder", () => {
       projectDir,
       artifactDir,
       workflow: createWorkflowSelection("bugfix"),
+      orchestration: createDefaultWorkflowOrchestration(),
       description: "修复登录报错",
     });
 

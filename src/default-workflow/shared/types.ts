@@ -57,10 +57,19 @@ export interface WorkflowSelection {
   label: string;
 }
 
+export interface WorkflowOrchestration {
+  profileId: string;
+  label: string;
+  phases: Phase[];
+  resumePolicy: "rebuild_runtime";
+  approvalMode: "human_in_the_loop";
+}
+
 export interface ProjectConfig {
   projectDir: string;
   artifactDir: string;
   workflow: WorkflowSelection;
+  orchestration: WorkflowOrchestration;
 }
 
 export type IntakeEventType =
@@ -145,4 +154,3 @@ export interface Runtime {
 export interface WorkflowController {
   handleIntakeEvent(event: IntakeEvent): Promise<WorkflowEvent[]>;
 }
-

@@ -20,7 +20,7 @@
 flowchart TD
     A[CLI readline] --> B[IntakeAgent]
     B --> C{用户意图}
-    C -->|新任务| D[资料追问]
+    C -->|新任务| D[资料追问 + 编排确认]
     C -->|补充/取消/恢复| E[控制指令分流]
     D --> F[Runtime Builder]
     F --> G[WorkflowController]
@@ -114,6 +114,7 @@ flowchart TD
 
 1. `pendingStep` 阶段仍然先识别控制指令
 2. 只有在不追问资料时，才走统一意图归一化
+3. 超范围判断现在不只是关键词命中，而是独立边界守卫
 
 第 1 点是 review 修复后的关键逻辑，用来避免把“取消任务”误当成项目目录或工件目录。
 
@@ -124,11 +125,13 @@ flowchart TD
 ```mermaid
 flowchart TD
     A[startDraftTask] --> B[confirm_workflow]
-    B -->|yes| C[collect_project_dir]
+    B -->|yes| C[confirm_workflow_orchestration]
     B -->|no| D[select_workflow]
     D --> C
-    C --> E[collect_artifact_dir]
-    E --> F[initializeRuntimeAndStartTask]
+    C -->|yes/default-v0.1| E[collect_project_dir]
+    C -->|no| F[阻断并提示仅支持 default-v0.1]
+    E --> G[collect_artifact_dir]
+    G --> H[initializeRuntimeAndStartTask]
 ```
 
 文件：
@@ -143,9 +146,10 @@ flowchart TD
 - 容易知道当前 CLI 在问什么
 - 出错时可以阻断在本步，不污染后续 Runtime
 
-当前 Intake 只追问这几类最小资料：
+当前 Intake 现在会追问这几类最小资料：
 
 - workflow 类型确认
+- workflow 流程编排确认
 - 目标项目目录
 - 工件保存目录
 
@@ -185,6 +189,7 @@ flowchart TD
     C --> D[saveResumeIndex]
     D --> E[dispatch init_task]
     E --> F[dispatch start_task]
+    F --> G[CLI 展示 workflow + orchestration]
 ```
 
 文件：
@@ -200,6 +205,7 @@ flowchart TD
 3. 再保存最近恢复索引
 4. 再发 `init_task`
 5. 再发 `start_task`
+6. CLI 展示当前 `workflow` 和 `orchestration`
 
 不能反过来，否则事件还没监听就发出去，CLI 就看不到初始化回显。
 
@@ -210,7 +216,7 @@ flowchart TD
 ```mermaid
 flowchart TD
     A[validateRuntimeInput] --> B[ProjectConfig]
-    B --> C[EventEmitter]
+    B -->|包含 workflow + orchestration| C[EventEmitter]
     C --> D[EventLogger]
     D --> E[ArtifactManager]
     E --> F[RoleRegistry]
@@ -228,6 +234,15 @@ flowchart TD
 
 - `IntakeAgent` 负责问和转发
 - builder 负责创建运行对象
+
+这里和早期版本不同的点是：  
+`ProjectConfig` 里现在不只包含 `workflow` 类型选择，还包含显式的 `orchestration` 配置，至少包括：
+
+- `profileId`
+- `label`
+- `phases`
+- `resumePolicy`
+- `approvalMode`
 
 而不是让入口类自己一边问问题一边 new 一堆依赖。
 
@@ -414,10 +429,11 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A[normalizeUserIntent] --> B{命中越权/超范围规则?}
-    B -->|是| C[返回 out_of_scope]
-    C --> D[统一回复 敬请期待]
-    B -->|否| E[继续正常任务流]
+    A[normalizeUserIntent] --> B[isOutOfScopeRequest]
+    B --> C{是否越权/超范围}
+    C -->|是| D[返回 out_of_scope]
+    D --> E[统一回复 敬请期待]
+    C -->|否| F[继续正常任务流]
 ```
 
 文件：
@@ -425,11 +441,17 @@ flowchart TD
 - `src/default-workflow/intake/intent.ts`
 - `src/default-workflow/shared/constants.ts`
 
-这层拦截的目的是保护 Intake 边界。  
+这层拦截的目的是保护 Intake 边界。当前已经不是只靠少量关键词命中，而是做了组合判断：  
+
+- 是否引用下游角色
+- 是否引用 phase
+- 是否出现“跳过 / 直接进入 / 扮演 / 输出工件”等指令型表达
+
 比如下面这些都不该继续往下走：
 
 - 跳过 Clarify 直接 Build
 - 帮我编排 workflow / phase
+- 你来当 Planner，直接输出 implementation plan
 - Archive / Architect / Web UI 之类超范围诉求
 
 如果不在入口层拦住，用户会误以为 Intake 有权决定下游 phase 编排。
@@ -441,15 +463,15 @@ flowchart TD
 ```mermaid
 flowchart LR
     A[intent.test.ts] --> B[规则分流]
-    C[runtime.test.ts] --> D[Runtime 重建]
-    E[agent.test.ts] --> F[入口交互关键路径]
+    C[runtime.test.ts] --> D[Runtime 重建 + orchestration 保留]
+    E[agent.test.ts] --> F[入口交互关键路径 + 编排确认]
 ```
 
 当前测试分层不是按技术栈拆，而是按风险点拆：
 
 - `intent.test.ts`：先守住规则归一化
-- `runtime.test.ts`：守住恢复语义
-- `agent.test.ts`：守住 Intake 层最关键交互
+- `runtime.test.ts`：守住恢复语义和 Runtime 初始化结构
+- `agent.test.ts`：守住 Intake 层最关键交互，包括编排确认步骤
 
 这样回归时更容易快速定位问题在哪一层。
 
@@ -461,14 +483,16 @@ flowchart LR
 flowchart TD
     A[已完成] --> A1[CLI 启动]
     A --> A2[资料追问]
-    A --> A3[Runtime 初始化]
-    A --> A4[事件桥接]
-    A --> A5[中断恢复]
-    A --> A6[超范围拦截]
+    A --> A3[workflow 编排确认]
+    A --> A4[Runtime 初始化]
+    A --> A5[事件桥接]
+    A --> A6[中断恢复]
+    A --> A7[边界守卫]
     B[未完成] --> B1[真实 Clarify/Plan/Build 执行]
     B --> B2[完整角色运行]
     B --> B3[真实模型分类链]
-    B --> B4[更复杂多任务恢复]
+    B --> B4[多套 orchestration profile]
+    B --> B5[更复杂多任务恢复]
 ```
 
 这张图是为了防止误解当前交付物范围。  

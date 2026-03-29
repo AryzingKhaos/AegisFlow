@@ -14,7 +14,9 @@ import {
   loadPersistedTaskById,
 } from "../runtime/builder";
 import {
+  createDefaultWorkflowOrchestration,
   createWorkflowSelection,
+  formatOrchestrationPhases,
   formatTaskStateSummary,
   isFalsyAnswer,
   isTruthyAnswer,
@@ -26,6 +28,7 @@ import type {
   PersistedTaskContext,
   Runtime,
   WorkflowEvent,
+  WorkflowOrchestration,
   WorkflowTaskType,
 } from "../shared/types";
 import {
@@ -37,6 +40,7 @@ import { initializeIntakeModel } from "./model";
 
 type PendingStep =
   | "confirm_workflow"
+  | "confirm_workflow_orchestration"
   | "select_workflow"
   | "collect_project_dir"
   | "collect_artifact_dir";
@@ -44,6 +48,7 @@ type PendingStep =
 interface DraftTask {
   description: string;
   workflow?: ReturnType<typeof createWorkflowSelection>;
+  orchestration?: WorkflowOrchestration;
   projectDir?: string;
   artifactDir?: string;
 }
@@ -153,10 +158,7 @@ export class IntakeAgent {
     switch (this.pendingStep) {
       case "confirm_workflow":
         if (isTruthyAnswer(input)) {
-          this.pendingStep = "collect_project_dir";
-          return [
-            "请提供目标项目目录。直接回车、输入“默认”或“当前目录”将使用当前工作目录。",
-          ];
+          return this.confirmWorkflowOrchestration();
         }
 
         if (isFalsyAnswer(input)) {
@@ -167,6 +169,8 @@ export class IntakeAgent {
         }
 
         return ["请回答 yes/no，或输入 是/否。"];
+      case "confirm_workflow_orchestration":
+        return this.handleWorkflowOrchestrationConfirmation(input);
       case "select_workflow":
         return this.selectWorkflowFromUserInput(input);
       case "collect_project_dir":
@@ -184,6 +188,7 @@ export class IntakeAgent {
     this.draft = {
       description,
       workflow,
+      orchestration: createDefaultWorkflowOrchestration(),
     };
     this.pendingStep = "confirm_workflow";
 
@@ -208,11 +213,12 @@ export class IntakeAgent {
     }
 
     this.draft.workflow = createWorkflowSelection(workflowType);
-    this.pendingStep = "collect_project_dir";
+    this.draft.orchestration = createDefaultWorkflowOrchestration();
+    this.pendingStep = "confirm_workflow_orchestration";
 
     return [
       `已切换为 ${this.draft.workflow.label}。`,
-      "请提供目标项目目录。直接回车、输入“默认”或“当前目录”将使用当前工作目录。",
+      this.getWorkflowOrchestrationPrompt(),
     ];
   }
 
@@ -238,7 +244,11 @@ export class IntakeAgent {
   }
 
   private async collectArtifactDir(input: string): Promise<string[]> {
-    if (!this.draft?.projectDir || !this.draft.workflow) {
+    if (
+      !this.draft?.projectDir ||
+      !this.draft.workflow ||
+      !this.draft.orchestration
+    ) {
       return this.resetDraftWithMessage("Runtime 初始化资料不完整，请重新描述任务。");
     }
 
@@ -251,7 +261,12 @@ export class IntakeAgent {
   }
 
   private async initializeRuntimeAndStartTask(): Promise<string[]> {
-    if (!this.draft?.projectDir || !this.draft.workflow || !this.draft.artifactDir) {
+    if (
+      !this.draft?.projectDir ||
+      !this.draft.workflow ||
+      !this.draft.orchestration ||
+      !this.draft.artifactDir
+    ) {
       return this.resetDraftWithMessage("Runtime 初始化资料缺失，无法启动任务。");
     }
 
@@ -260,6 +275,7 @@ export class IntakeAgent {
       projectDir: this.draft.projectDir,
       artifactDir: this.draft.artifactDir,
       workflow: this.draft.workflow,
+      orchestration: this.draft.orchestration,
       description: this.draft.description,
     });
 
@@ -271,6 +287,7 @@ export class IntakeAgent {
     const lines = [
       `Runtime 初始化成功：${buildResult.runtime.runtimeId}`,
       `任务类型：${buildResult.runtime.projectConfig.workflow.label}`,
+      `流程编排：${buildResult.runtime.projectConfig.orchestration.label} (${formatOrchestrationPhases(buildResult.runtime.projectConfig.orchestration.phases)})`,
       `工件目录：${buildResult.runtime.projectConfig.artifactDir}`,
       ...buildResult.capabilityWarnings.map((warning) => `说明：${warning}`),
     ];
@@ -282,6 +299,7 @@ export class IntakeAgent {
         {
           title: buildResult.runtime.taskState.title,
           workflow: buildResult.runtime.projectConfig.workflow,
+          orchestration: buildResult.runtime.projectConfig.orchestration,
         },
       )),
     );
@@ -445,6 +463,37 @@ export class IntakeAgent {
     }
 
     return null;
+  }
+
+  private confirmWorkflowOrchestration(): string[] {
+    this.pendingStep = "confirm_workflow_orchestration";
+    return [this.getWorkflowOrchestrationPrompt()];
+  }
+
+  private handleWorkflowOrchestrationConfirmation(input: string): string[] {
+    if (isTruthyAnswer(input) || /^(默认|default-v0\.1|default)$/i.test(input)) {
+      this.pendingStep = "collect_project_dir";
+      return [
+        "请提供目标项目目录。直接回车、输入“默认”或“当前目录”将使用当前工作目录。",
+      ];
+    }
+
+    if (isFalsyAnswer(input)) {
+      return [
+        "当前版本仅支持 default-workflow/v0.1 编排。若接受该编排请输入 yes，或输入“取消任务”。",
+      ];
+    }
+
+    return [
+      "请确认是否使用当前 workflow 编排。可输入 yes/no，或输入 default-v0.1。",
+    ];
+  }
+
+  private getWorkflowOrchestrationPrompt(): string {
+    const phases = formatOrchestrationPhases(
+      this.draft?.orchestration?.phases ?? createDefaultWorkflowOrchestration().phases,
+    );
+    return `当前 workflow 编排将使用 default-workflow/v0.1：${phases}。是否确认？请回答 yes/no。`;
   }
 
   private getResumeIndexPath(): string {
