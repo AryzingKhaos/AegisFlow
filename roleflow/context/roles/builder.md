@@ -25,8 +25,6 @@
 - 完成 `@roleflow/implementation/` 下的任务项后，必须更新对应文档中的 Todolist 状态
 - 遵循所有项目编码规范（见 `@roleflow/context/standards/index.md`）
 - 避免 `@roleflow/context/standards/common-mistakes.md` 中列出的常见错误
-- 代码注释必须是英文注释
-- 代码注释中不得出现中文
 - 不得修改 `@roleflow/implementation/` 下文档中 Todolist 以外的任何内容
 - 完成代码修改后，必须补充一份实现说明
 

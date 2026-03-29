@@ -8,6 +8,8 @@
   },
   "scripts": {
     "build": "tsc",
+    "cli": "node --env-file=.env dist/cli/index.js",
+    "cli:build": "pnpm build && node --env-file=.env dist/cli/index.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
