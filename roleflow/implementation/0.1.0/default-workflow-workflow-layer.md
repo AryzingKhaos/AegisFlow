@@ -137,25 +137,25 @@ flowchart TD
 
 ## Todolist (todoList)
 
-- [ ] 确认 `Workflow` 层改造边界，明确会涉及 `shared/types`、`runtime/builder`、`workflow/controller`、持久化和测试模块。
-- [ ] 对齐 `TaskState`、`TaskStatus`、`Phase`、`PhaseStatus`、`WorkflowEventType`、`ProjectConfig.workflowPhases` 的命名与字段定义，修正与 PRD 不一致的别名或占位命名。
-- [ ] 显式收敛 `ProjectConfig.workflowPhases` 的类型/配置结构，解决 `project.md` 当前 `Phase[]` 定义与 Workflow PRD 编排需求之间的不一致，并在实现中同步更新相关接口约束。
-- [ ] 定义 `ProjectConfig.workflowPhases` 的最小编排结构，外部契约对齐 `project.md` 中 `aegisproject.yaml` 示例，至少覆盖 `name`、`hostRole`、`needApproval` 和恢复所需字段。
-- [ ] 固定 `v0.1` 默认 phase-host-role 映射表，避免 `review/critic`、`test-design/test-designer`、`unit-test/test-writer`、`test/tester` 等命名在实现时再次漂移。
-- [ ] 将 `unit-test` 与 `test` 的 host role 作为两个独立入口实现，确保 `unit-test -> test-writer`、`test -> tester` 不被合并。
-- [ ] 标记并补齐 `tester` 角色文档缺口；在文档未补齐前，至少在实现边界和依赖说明中显式记录该角色是当前 Workflow 落地的外部前置项。
-- [ ] 定义 `WorkflowController` 的职责入口边界，明确 `run(taskId)`、`resume(taskId, input?)`、`runPhase(phase)`、`runRole(roleName, input)` 与 Intake 事件桥接的关系。
-- [ ] 实现或重构 `WorkflowController` 主流程，使任务启动不再停留在 `handleIntakeEvent` 的少量分支处理。
-- [ ] 实现 phase 推进逻辑，覆盖 `clarify -> explore -> plan -> build -> review -> test-design -> unit-test -> test` 的主链路。
-- [ ] 接入 `RoleRegistry` 与 host role 解析逻辑，确保 `WorkflowController` 通过注册表获取角色并调用 `Role.run`。
-- [ ] 补齐 `ExecutionContext` / `RoleResult` 的最小传递边界，保证 `Workflow` 能接收角色返回并决定后续工件与状态处理。
-- [ ] 实现任务开始、phase 开始、role 开始、role 结束、phase 结束、任务结束等关键事件的广播与日志记录。
-- [ ] 实现 `ArtifactManager` 协同写工件能力，并在工件创建后发出 `artifact_created` 事件。
-- [ ] 实现 `TaskState` md 快照持久化策略，覆盖启动后、phase 变化、等待态、中断、失败、完成等关键节点。
-- [ ] 实现 `waiting_approval` 和 `waiting_user_input` 作为通用暂停能力的状态推进与恢复点记录。
-- [ ] 实现 `interrupt` 与 `resume` 链路，保证恢复依赖重建后的 `Runtime` 和快照信息，而不是复用旧内存实例。
-- [ ] 实现错误收敛路径，保证 role / artifact / phase 失败时都能统一落到失败状态、错误事件、日志和快照。
-- [ ] 更新 `runtime/builder`，确保其向 `Workflow` 提供完整的 `Runtime` 依赖集合和编排输入。
-- [ ] 校对与上游 `Intake` 层计划和现有代码的接口契约，避免 `IntakeEvent` / `WorkflowEvent` 语义与 `Workflow` 实现脱节。
-- [ ] 添加或更新测试，覆盖状态机一致性、phase 顺序、等待审批、等待用户输入、中断恢复、错误收敛、快照恢复和事件广播。
-- [ ] 完成自检，确认 `WorkflowController` 未越权承担 Agent/CLI/Role 职责，并复核命名与 PRD、`project.md` 一致。
+- [x] 确认 `Workflow` 层改造边界，明确会涉及 `shared/types`、`runtime/builder`、`workflow/controller`、持久化和测试模块。
+- [x] 对齐 `TaskState`、`TaskStatus`、`Phase`、`PhaseStatus`、`WorkflowEventType`、`ProjectConfig.workflowPhases` 的命名与字段定义，修正与 PRD 不一致的别名或占位命名。
+- [x] 显式收敛 `ProjectConfig.workflowPhases` 的类型/配置结构，解决 `project.md` 当前 `Phase[]` 定义与 Workflow PRD 编排需求之间的不一致，并在实现中同步更新相关接口约束。
+- [x] 定义 `ProjectConfig.workflowPhases` 的最小编排结构，外部契约对齐 `project.md` 中 `aegisproject.yaml` 示例，至少覆盖 `name`、`hostRole`、`needApproval` 和恢复所需字段。
+- [x] 固定 `v0.1` 默认 phase-host-role 映射表，避免 `review/critic`、`test-design/test-designer`、`unit-test/test-writer`、`test/tester` 等命名在实现时再次漂移。
+- [x] 将 `unit-test` 与 `test` 的 host role 作为两个独立入口实现，确保 `unit-test -> test-writer`、`test -> tester` 不被合并。
+- [x] 标记并补齐 `tester` 角色文档缺口；在文档未补齐前，至少在实现边界和依赖说明中显式记录该角色是当前 Workflow 落地的外部前置项。
+- [x] 定义 `WorkflowController` 的职责入口边界，明确 `run(taskId)`、`resume(taskId, input?)`、`runPhase(phase)`、`runRole(roleName, input)` 与 Intake 事件桥接的关系。
+- [x] 实现或重构 `WorkflowController` 主流程，使任务启动不再停留在 `handleIntakeEvent` 的少量分支处理。
+- [x] 实现 phase 推进逻辑，覆盖 `clarify -> explore -> plan -> build -> review -> test-design -> unit-test -> test` 的主链路。
+- [x] 接入 `RoleRegistry` 与 host role 解析逻辑，确保 `WorkflowController` 通过注册表获取角色并调用 `Role.run`。
+- [x] 补齐 `ExecutionContext` / `RoleResult` 的最小传递边界，保证 `Workflow` 能接收角色返回并决定后续工件与状态处理。
+- [x] 实现任务开始、phase 开始、role 开始、role 结束、phase 结束、任务结束等关键事件的广播与日志记录。
+- [x] 实现 `ArtifactManager` 协同写工件能力，并在工件创建后发出 `artifact_created` 事件。
+- [x] 实现 `TaskState` md 快照持久化策略，覆盖启动后、phase 变化、等待态、中断、失败、完成等关键节点。
+- [x] 实现 `waiting_approval` 和 `waiting_user_input` 作为通用暂停能力的状态推进与恢复点记录。
+- [x] 实现 `interrupt` 与 `resume` 链路，保证恢复依赖重建后的 `Runtime` 和快照信息，而不是复用旧内存实例。
+- [x] 实现错误收敛路径，保证 role / artifact / phase 失败时都能统一落到失败状态、错误事件、日志和快照。
+- [x] 更新 `runtime/builder`，确保其向 `Workflow` 提供完整的 `Runtime` 依赖集合和编排输入。
+- [x] 校对与上游 `Intake` 层计划和现有代码的接口契约，避免 `IntakeEvent` / `WorkflowEvent` 语义与 `Workflow` 实现脱节。
+- [x] 添加或更新测试，覆盖状态机一致性、phase 顺序、等待审批、等待用户输入、中断恢复、错误收敛、快照恢复和事件广播。
+- [x] 完成自检，确认 `WorkflowController` 未越权承担 Agent/CLI/Role 职责，并复核命名与 PRD、`project.md` 一致。

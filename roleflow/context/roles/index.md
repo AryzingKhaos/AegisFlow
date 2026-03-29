@@ -29,6 +29,7 @@
 | [frontend-critic.md](frontend-critic.md) | [../../../blueprints/roles/frontend-critic.md](../../../blueprints/roles/frontend-critic.md) | 前端审查者 | 审计必读规范、i18n 文件、日志与依赖检查约束 |
 | [planner.md](planner.md) | [../../../blueprints/roles/planner.md](../../../blueprints/roles/planner.md) | 规划者 | requirements / implementation / features 路径与命名规则 |
 | [test-designer.md](test-designer.md) | [../../../blueprints/roles/test-designer.md](../../../blueprints/roles/test-designer.md) | 测试设计者 | testDesign 输出路径与调试打印记录位置 |
+| [tester.md](tester.md) | 暂无 | 测试执行者 | 当前仅保留最小职责定义，后续由用户补充 |
 | [test-writer.md](test-writer.md) | [../../../blueprints/roles/test-writer.md](../../../blueprints/roles/test-writer.md) | 单测编写者 | Jest 配置、测试目录、命名约束 |
 | [weekly-reporter.md](weekly-reporter.md) | [../../../blueprints/roles/weekly-reporter.md](../../../blueprints/roles/weekly-reporter.md) | 周报撰写者 | Aaron 提交查询规则、AegisFlow 周报模板、输出路径 |
 
@@ -53,6 +54,7 @@
 | Planner | 设计方案、写 Spec | 编写实现代码 |
 | Builder | 实现代码、创建 Change Request | 重新设计架构、修改需求 |
 | Test Designer | 设计测试方案、输出测试清单、插入/删除调试打印语句 | 修改业务逻辑代码、提出实现方案、代码审查 |
+| Tester | 执行测试阶段任务、产出测试执行结果 | 修改业务代码、替代 Test Writer 编写单测 |
 | Test Writer | 编写单元测试与测试辅助代码 | 修改业务代码 |
 | Frontend Critic | 识别问题、风险评估 | 修改代码、提供修复方案 |
 | Archivist | 新建/更新文档、维护索引 | 修改源代码、改变系统设计 |
