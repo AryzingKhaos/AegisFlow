@@ -2,15 +2,15 @@ import path from "node:path";
 import {
   DEFAULT_ARTIFACT_DIR_NAME,
   DEFAULT_WORKFLOW_ID,
-  DEFAULT_WORKFLOW_ORCHESTRATION_PHASES,
-  DEFAULT_WORKFLOW_ORCHESTRATION_PROFILE_ID,
+  DEFAULT_WORKFLOW_PHASES,
+  DEFAULT_WORKFLOW_PROFILE_ID,
+  DEFAULT_WORKFLOW_PROFILE_LABEL,
   SUPPORTED_WORKFLOW_TYPES,
 } from "./constants";
 import type {
-  Phase,
   ProjectConfig,
   TaskState,
-  WorkflowOrchestration,
+  WorkflowPhaseConfig,
   WorkflowSelection,
   WorkflowTaskType,
 } from "./types";
@@ -64,25 +64,19 @@ export function createWorkflowSelection(
   };
 }
 
-export function createDefaultWorkflowOrchestration(): WorkflowOrchestration {
-  return {
-    profileId: DEFAULT_WORKFLOW_ORCHESTRATION_PROFILE_ID,
-    label: "default-workflow/v0.1",
-    phases: [...DEFAULT_WORKFLOW_ORCHESTRATION_PHASES],
-    resumePolicy: "rebuild_runtime",
-    approvalMode: "human_in_the_loop",
-  };
+export function createDefaultWorkflowPhases(): WorkflowPhaseConfig[] {
+  return DEFAULT_WORKFLOW_PHASES.map((phaseConfig) => ({ ...phaseConfig }));
 }
 
-export function formatOrchestrationPhases(phases: Phase[]): string {
-  return phases.join(" -> ");
-}
-
-export function createInitialTaskState(taskId: string, title: string): TaskState {
+export function createInitialTaskState(
+  taskId: string,
+  title: string,
+  workflowPhases: WorkflowPhaseConfig[],
+): TaskState {
   return {
     taskId,
     title,
-    currentPhase: "intake",
+    currentPhase: workflowPhases[0].name,
     phaseStatus: "pending",
     status: TaskStatus.IDLE,
     updatedAt: Date.now(),
@@ -104,23 +98,36 @@ export function createProjectConfig(input: {
   projectDir: string;
   artifactDir: string;
   workflow: WorkflowSelection;
-  orchestration: WorkflowOrchestration;
+  workflowPhases?: WorkflowPhaseConfig[];
+  workflowProfileId?: string;
+  workflowProfileLabel?: string;
 }): ProjectConfig {
   return {
     projectDir: path.resolve(input.projectDir),
     artifactDir: path.resolve(input.artifactDir),
     workflow: input.workflow,
-    orchestration: {
-      ...input.orchestration,
-      phases: [...input.orchestration.phases],
-    },
+    workflowProfileId: input.workflowProfileId ?? DEFAULT_WORKFLOW_PROFILE_ID,
+    workflowProfileLabel:
+      input.workflowProfileLabel ?? DEFAULT_WORKFLOW_PROFILE_LABEL,
+    workflowPhases: (input.workflowPhases ?? createDefaultWorkflowPhases()).map(
+      (phaseConfig) => ({
+        ...phaseConfig,
+      }),
+    ),
+    resumePolicy: "rebuild_runtime",
+    approvalMode: "human_in_the_loop",
   };
+}
+
+export function formatWorkflowPhases(phases: WorkflowPhaseConfig[]): string {
+  return phases.map((phaseConfig) => phaseConfig.name).join(" -> ");
 }
 
 export function formatTaskStateSummary(taskState: TaskState): string {
   const parts = [
     `currentPhase=${taskState.currentPhase}`,
     `status=${taskState.status}`,
+    `phaseStatus=${taskState.phaseStatus}`,
   ];
 
   if (taskState.resumeFrom) {

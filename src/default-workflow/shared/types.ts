@@ -8,22 +8,26 @@ export type WorkflowTaskType =
 export type WorkflowName = "default-workflow";
 
 export type Phase =
-  | "intake"
   | "clarify"
   | "explore"
   | "plan"
   | "build"
-  | "critic"
-  | "test_design"
+  | "review"
+  | "test-design"
+  | "unit-test"
   | "test";
 
-export type PhaseStatus =
-  | "pending"
-  | "running"
-  | "waiting"
-  | "completed"
-  | "failed"
-  | "cancelled";
+export type RoleName =
+  | "clarifier"
+  | "explorer"
+  | "planner"
+  | "builder"
+  | "critic"
+  | "test-designer"
+  | "test-writer"
+  | "tester";
+
+export type PhaseStatus = "pending" | "running" | "done";
 
 export enum TaskStatus {
   IDLE = "idle",
@@ -37,7 +41,7 @@ export enum TaskStatus {
 
 export interface ResumePoint {
   phase: Phase;
-  roleName: string;
+  roleName: RoleName;
   currentStep?: string;
 }
 
@@ -57,19 +61,22 @@ export interface WorkflowSelection {
   label: string;
 }
 
-export interface WorkflowOrchestration {
-  profileId: string;
-  label: string;
-  phases: Phase[];
-  resumePolicy: "rebuild_runtime";
-  approvalMode: "human_in_the_loop";
+export interface WorkflowPhaseConfig {
+  name: Phase;
+  hostRole: RoleName;
+  needApproval: boolean;
+  pauseForInput?: boolean;
 }
 
 export interface ProjectConfig {
   projectDir: string;
   artifactDir: string;
   workflow: WorkflowSelection;
-  orchestration: WorkflowOrchestration;
+  workflowProfileId: string;
+  workflowProfileLabel: string;
+  workflowPhases: WorkflowPhaseConfig[];
+  resumePolicy: "rebuild_runtime";
+  approvalMode: "human_in_the_loop";
 }
 
 export type IntakeEventType =
@@ -114,7 +121,31 @@ export interface PersistedTaskContext {
   description: string;
   createdAt: number;
   lastRuntimeId: string;
+  latestInput?: string;
   projectConfig: ProjectConfig;
+}
+
+export interface TaskArtifact {
+  key: string;
+  phase: Phase;
+  roleName: RoleName;
+  title: string;
+  content: string;
+}
+
+export interface RoleResult {
+  summary: string;
+  artifacts: TaskArtifact[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface ExecutionContext {
+  taskId: string;
+  phase: Phase;
+  cwd: string;
+  projectConfig: ProjectConfig;
+  taskState: TaskState;
+  latestInput?: string;
 }
 
 export interface EventLogger {
@@ -125,18 +156,27 @@ export interface ArtifactManager {
   initializeTask(taskId: string): Promise<void>;
   saveTaskState(taskState: TaskState): Promise<string>;
   saveTaskContext(context: PersistedTaskContext): Promise<string>;
+  saveArtifact(taskId: string, artifact: TaskArtifact): Promise<string>;
   loadTaskState(taskId: string): Promise<TaskState>;
   loadTaskContext(taskId: string): Promise<PersistedTaskContext>;
   findLatestResumableTaskId(): Promise<string | null>;
 }
 
 export interface RoleDescriptor {
-  name: string;
+  name: RoleName;
   description: string;
   placeholder: boolean;
 }
 
+export interface Role {
+  name: RoleName;
+  description: string;
+  placeholder: boolean;
+  run(input: string, context: ExecutionContext): Promise<RoleResult>;
+}
+
 export interface RoleRegistry {
+  get(name: RoleName): Role;
   list(): RoleDescriptor[];
 }
 
@@ -153,4 +193,8 @@ export interface Runtime {
 
 export interface WorkflowController {
   handleIntakeEvent(event: IntakeEvent): Promise<WorkflowEvent[]>;
+  run(taskId: string, input?: string): Promise<WorkflowEvent[]>;
+  resume(taskId: string, input?: string): Promise<WorkflowEvent[]>;
+  runPhase(phase: Phase, input?: string): Promise<WorkflowEvent[]>;
+  runRole(roleName: RoleName, input: string): Promise<RoleResult>;
 }

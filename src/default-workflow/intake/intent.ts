@@ -160,8 +160,8 @@ export function isOutOfScopeRequest(
 
   if (
     hasActiveTask &&
-    (/(进入|切到|切换到).*(clarify|explore|plan|build|critic|test)/i.test(input) ||
-      /(进入|切到|切换到).*(澄清|探索|规划|实现|评审|测试)/.test(input))
+    (/(进入|切到|切换到).*(clarify|explore|plan|build|review|test-design|unit-test|test)/i.test(input) ||
+      /(进入|切到|切换到).*(澄清|探索|规划|实现|评审|测试设计|单元测试|测试)/.test(input))
   ) {
     return true;
   }

@@ -87,7 +87,7 @@ describe("IntakeAgent", () => {
     const lines = await agent.handleUserInput("y");
 
     expect(lines).toEqual([
-      "当前 workflow 编排将使用 default-workflow/v0.1：clarify -> explore -> plan -> build -> critic -> test_design -> test。是否确认？请回答 yes/no。",
+      "当前 workflow 编排将使用 default-workflow/v0.1：clarify -> explore -> plan -> build -> review -> test-design -> unit-test -> test。是否确认？请回答 yes/no。",
     ]);
   });
 });

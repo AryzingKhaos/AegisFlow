@@ -1,4 +1,9 @@
-import type { Phase, WorkflowTaskType } from "./types";
+import type {
+  Phase,
+  RoleName,
+  WorkflowPhaseConfig,
+  WorkflowTaskType,
+} from "./types";
 
 export const DEFAULT_INTAKE_MODEL = "gpt5.4";
 export const DEFAULT_INTAKE_BASE_URL = "https://co.yes.vg/v1";
@@ -6,16 +11,8 @@ export const DEFAULT_WORKFLOW_ID = "default-workflow";
 export const DEFAULT_ARTIFACT_DIR_NAME = ".aegisflow/artifacts";
 export const INTAKE_STATE_DIR_NAME = ".aegisflow";
 export const INTAKE_RESUME_INDEX_FILE = "latest-task.json";
-export const DEFAULT_WORKFLOW_ORCHESTRATION_PROFILE_ID = "default-v0.1";
-export const DEFAULT_WORKFLOW_ORCHESTRATION_PHASES: Phase[] = [
-  "clarify",
-  "explore",
-  "plan",
-  "build",
-  "critic",
-  "test_design",
-  "test",
-];
+export const DEFAULT_WORKFLOW_PROFILE_ID = "default-v0.1";
+export const DEFAULT_WORKFLOW_PROFILE_LABEL = "default-workflow/v0.1";
 
 export const SUPPORTED_WORKFLOW_TYPES: Record<
   WorkflowTaskType,
@@ -67,12 +64,6 @@ export const OUT_OF_SCOPE_PATTERNS = [
   /web ui/i,
   /后台管理/,
   /多工作流市场/,
-  /跳过\s*(clarify|澄清|explore|plan|规划|build|critic|test)/i,
-  /直接进入\s*(clarify|澄清|explore|plan|规划|build|critic|test)/i,
-  /直接\s*(build|plan|critic|test)/i,
-  /phase\s*编排/i,
-  /workflow\s*编排/i,
-  /编排\s*phase/i,
   /帮我编排/i,
 ];
 
@@ -84,6 +75,7 @@ export const OUT_OF_SCOPE_ROLE_PATTERNS = [
   /\bcritic\b/i,
   /\btest designer\b/i,
   /\btest writer\b/i,
+  /\btester\b/i,
   /澄清角色/,
   /探索角色/,
   /规划角色/,
@@ -91,6 +83,7 @@ export const OUT_OF_SCOPE_ROLE_PATTERNS = [
   /评审角色/,
   /测试设计角色/,
   /测试编写角色/,
+  /测试执行角色/,
 ];
 
 export const OUT_OF_SCOPE_PHASE_PATTERNS = [
@@ -98,13 +91,17 @@ export const OUT_OF_SCOPE_PHASE_PATTERNS = [
   /\bexplore\b/i,
   /\bplan\b/i,
   /\bbuild\b/i,
-  /\bcritic\b/i,
+  /\breview\b/i,
+  /\btest-design\b/i,
+  /\bunit-test\b/i,
   /\btest\b/i,
   /澄清阶段/,
   /探索阶段/,
   /规划阶段/,
   /实现阶段/,
   /评审阶段/,
+  /测试设计阶段/,
+  /单元测试阶段/,
   /测试阶段/,
 ];
 
@@ -125,3 +122,25 @@ export const OUT_OF_SCOPE_DIRECTIVE_PATTERNS = [
   /输出.*工件/,
   /生成.*工件/,
 ];
+
+export const DEFAULT_WORKFLOW_PHASES: WorkflowPhaseConfig[] = [
+  { name: "clarify", hostRole: "clarifier", needApproval: false },
+  { name: "explore", hostRole: "explorer", needApproval: false },
+  { name: "plan", hostRole: "planner", needApproval: true },
+  { name: "build", hostRole: "builder", needApproval: false },
+  { name: "review", hostRole: "critic", needApproval: true },
+  { name: "test-design", hostRole: "test-designer", needApproval: false },
+  { name: "unit-test", hostRole: "test-writer", needApproval: false },
+  { name: "test", hostRole: "tester", needApproval: false },
+];
+
+export const DEFAULT_PHASE_ROLE_MAPPING: Record<Phase, RoleName> = {
+  clarify: "clarifier",
+  explore: "explorer",
+  plan: "planner",
+  build: "builder",
+  review: "critic",
+  "test-design": "test-designer",
+  "unit-test": "test-writer",
+  test: "tester",
+};
