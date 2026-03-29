@@ -17,3 +17,4 @@
 | 版本 | 模块 | 文档 |
 |------|------|------|
 | `0.1.0` | `default-workflow-intake-layer` | [0.1.0/default-workflow-intake-layer-prd.md](0.1.0/default-workflow-intake-layer-prd.md) |
+| `0.1.0` | `default-workflow-workflow-layer` | [0.1.0/default-workflow-workflow-layer-prd.md](0.1.0/default-workflow-workflow-layer-prd.md) |

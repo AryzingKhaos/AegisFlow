@@ -38,6 +38,19 @@ flowchart TD
 - `Runtime Builder` 负责装配运行对象
 - `WorkflowController` 负责推进 `TaskState`
 
+关键代码对应：
+
+- `CLI readline`：`main()`、`readline.createInterface()`，位于 `src/cli/index.ts`
+- `IntakeAgent`：`class IntakeAgent`，位于 `src/default-workflow/intake/agent.ts`
+- `用户意图`：`handleUserInput()`、`normalizeUserIntent()`
+- `资料追问 + 编排确认`：`handlePendingStep()`、`handleWorkflowOrchestrationConfirmation()`
+- `控制指令分流`：`handlePendingStepControlIntent()`、`cancelTask()`、`resumeTask()`
+- `Runtime Builder`：`buildRuntimeForNewTask()`、`buildRuntimeForResume()`
+- `WorkflowController`：`class DefaultWorkflowController`、`handleIntakeEvent()`
+- `TaskState + Snapshot`：`TaskState`、`artifactManager.saveTaskState()`
+- `WorkflowEvent`：`WorkflowEvent`、`createWorkflowEvent()`
+- `CLI 渲染`：`attachRuntime()`、`formatWorkflowEvent()`、`printLines()`
+
 ---
 
 ## 2. 整体图：文件职责划分
@@ -57,6 +70,14 @@ flowchart LR
 - `src/default-workflow/runtime/builder.ts`：Runtime 装配
 - `src/default-workflow/workflow/controller.ts`：状态推进
 - `src/default-workflow/persistence/task-store.ts`：快照与上下文持久化
+
+关键代码对应：
+
+- `src/cli/index.ts`：`main()`、`enqueue()`、`printLines()`
+- `src/default-workflow/intake/agent.ts`：`IntakeAgent`、`handleUserInput()`、`initializeRuntimeAndStartTask()`
+- `src/default-workflow/runtime/builder.ts`：`buildRuntimeForNewTask()`、`buildRuntimeForResume()`、`validateRuntimeInput()`
+- `src/default-workflow/workflow/controller.ts`：`DefaultWorkflowController`、`handleIntakeEvent()`
+- `src/default-workflow/persistence/task-store.ts`：`FileArtifactManager`、`saveTaskState()`、`loadTaskContext()`
 
 ---
 
@@ -85,6 +106,15 @@ CLI 只负责：
 - 把结果打印出来
 
 这样后续即使把 CLI 换成别的入口，核心逻辑也还能保留在 `IntakeAgent`。
+
+关键代码对应：
+
+- `readline line/SIGINT`：`rl.on("line", ...)`、`rl.on("SIGINT", ...)`
+- `enqueue`：`const enqueue = (work) => { ... }`
+- `IntakeAgent.handleUserInput`：`agent.handleUserInput(line)`
+- `IntakeAgent.handleInterruptSignal`：`agent.handleInterruptSignal()`
+- `返回 lines`：`Promise<string[]>`
+- `console.log`：`printLines()`
 
 ---
 
@@ -117,6 +147,19 @@ flowchart TD
 3. 超范围判断现在不只是关键词命中，而是独立边界守卫
 
 第 1 点是 review 修复后的关键逻辑，用来避免把“取消任务”误当成项目目录或工件目录。
+
+关键代码对应：
+
+- `handleUserInput`：`IntakeAgent.handleUserInput()`
+- `pendingStep?`：`this.pendingStep`
+- `先识别控制指令`：`handlePendingStepControlIntent()`
+- `取消/恢复/超范围`：`cancelTask()`、`resumeTask()`、`OUT_OF_SCOPE_REPLY`
+- `继续资料追问`：`handlePendingStep()`
+- `normalizeUserIntent`：`normalizeUserIntent(input, hasActiveTask)`
+- `resumeTask`：`resumeTask()`
+- `cancelTask`：`cancelTask()`
+- `dispatchRuntimeEvent`：`dispatchRuntimeEvent()`
+- `startDraftTask`：`startDraftTask()`
 
 ---
 
@@ -153,6 +196,16 @@ flowchart TD
 - 目标项目目录
 - 工件保存目录
 
+关键代码对应：
+
+- `startDraftTask`：`startDraftTask()`
+- `confirm_workflow`：`PendingStep = "confirm_workflow"`
+- `select_workflow`：`selectWorkflowFromUserInput()`
+- `confirm_workflow_orchestration`：`confirmWorkflowOrchestration()`、`handleWorkflowOrchestrationConfirmation()`
+- `collect_project_dir`：`collectProjectDir()`
+- `collect_artifact_dir`：`collectArtifactDir()`
+- `initializeRuntimeAndStartTask`：`initializeRuntimeAndStartTask()`
+
 ---
 
 ## 6. 关键图：追问阶段为什么要先识别控制指令
@@ -177,6 +230,13 @@ flowchart LR
 - 明显超范围的越权请求
 
 所以现在 `pendingStep` 不是“只收资料”，而是“先识别控制指令，识别不到再收资料”。
+
+关键代码对应：
+
+- `handlePendingStepControlIntent?`：`handlePendingStepControlIntent()`
+- `取消当前创建流程`：`cancelTask()` 在 `this.pendingStep && !this.runtime` 分支
+- `被当成目录字符串`：`collectProjectDir()`、`collectArtifactDir()`
+- `报目录错误或写入错误资料`：`fs.stat(projectDir)`、`resolveArtifactDir()`
 
 ---
 
@@ -208,6 +268,16 @@ flowchart TD
 6. CLI 展示当前 `workflow` 和 `orchestration`
 
 不能反过来，否则事件还没监听就发出去，CLI 就看不到初始化回显。
+
+关键代码对应：
+
+- `initializeRuntimeAndStartTask`：`initializeRuntimeAndStartTask()`
+- `buildRuntimeForNewTask`：`buildRuntimeForNewTask()`
+- `attachRuntime`：`attachRuntime()`
+- `saveResumeIndex`：`saveResumeIndex()`
+- `dispatch init_task`：`dispatchRuntimeEvent("init_task", ...)`
+- `dispatch start_task`：`dispatchRuntimeEvent("start_task", ...)`
+- `CLI 展示 workflow + orchestration`：`lines` 中的 `任务类型`、`流程编排`
 
 ---
 
@@ -246,6 +316,19 @@ flowchart TD
 
 而不是让入口类自己一边问问题一边 new 一堆依赖。
 
+关键代码对应：
+
+- `validateRuntimeInput`：`validateRuntimeInput(projectDir, artifactDir, workflow, orchestration)`
+- `ProjectConfig`：`createProjectConfig()`
+- `workflow + orchestration`：`ProjectConfig.workflow`、`ProjectConfig.orchestration`
+- `EventEmitter`：`new EventEmitter()`
+- `EventLogger`：`new JsonlEventLogger(...)`
+- `ArtifactManager`：`new FileArtifactManager(projectConfig)`
+- `RoleRegistry`：`new StaticRoleRegistry()`
+- `TaskState`：`createInitialTaskState()`
+- `WorkflowController`：`new DefaultWorkflowController(...)`
+- `Runtime`：`const runtime: Runtime = { ... }`
+
 ---
 
 ## 9. 中层图：恢复链路的整体结构
@@ -275,6 +358,16 @@ flowchart TD
 - 实在没有，再回退到默认目录扫描
 
 这样才能尽量避免恢复错任务。
+
+关键代码对应：
+
+- `resumeTask`：`resumeTask()`
+- `当前 runtime 上下文`：`loadCurrentPersistedContext()`
+- `最近任务索引`：`loadPersistedContextFromResumeIndex()`
+- `默认工件目录回退扫描`：`loadLatestPersistedContextFromDisk()`、`findLatestPersistedTask()`
+- `buildRuntimeForResume`：`buildRuntimeForResume()`
+- `attachRuntime`：`attachRuntime()`
+- `dispatch resume_task`：`dispatchRuntimeEvent("resume_task", ...)`
 
 ---
 
@@ -310,6 +403,13 @@ flowchart LR
 
 这样 CLI 重启后仍然知道该去哪个工件目录找那条任务。
 
+关键代码对应：
+
+- `latest-task.json`：`INTAKE_RESUME_INDEX_FILE`
+- `读取 latest-task.json`：`loadPersistedContextFromResumeIndex()`
+- `taskId + artifactDir`：`ResumeIndexSnapshot`
+- `准确恢复`：`loadPersistedTaskById(snapshot.artifactDir, snapshot.taskId)`
+
 ---
 
 ## 11. 局部图：`buildRuntimeForResume()` 为什么必须重建
@@ -341,6 +441,17 @@ flowchart TD
 - 旧内存状态污染
 - 恢复依赖旧进程还活着
 
+关键代码对应：
+
+- `buildRuntimeForResume`：`buildRuntimeForResume()`
+- `重新创建 EventEmitter`：`new EventEmitter()`
+- `重新创建 EventLogger`：`new JsonlEventLogger(...)`
+- `重新创建 ArtifactManager`：`new FileArtifactManager(projectConfig)`
+- `重新创建 RoleRegistry`：`new StaticRoleRegistry()`
+- `从磁盘读取 TaskState`：`artifactManager.loadTaskState(...)`
+- `重新创建 WorkflowController`：`new DefaultWorkflowController(...)`
+- `返回新的 Runtime`：`const runtime: Runtime = { ... }`
+
 ---
 
 ## 12. 局部图：`WorkflowController` 的事件推进逻辑
@@ -367,6 +478,17 @@ flowchart TD
 - `WorkflowController` 才是唯一推进者
 
 这条边界是当前实现最重要的架构约束之一。
+
+关键代码对应：
+
+- `IntakeEvent`：`IntakeEventType`
+- `handleIntakeEvent`：`DefaultWorkflowController.handleIntakeEvent()`
+- `init_task -> WAITING_APPROVAL`：`TaskStatus.WAITING_APPROVAL`
+- `start_task -> clarify + RUNNING`：`currentPhase = "clarify"`、`TaskStatus.RUNNING`
+- `participate`：`progress` 事件 + `latestMessage`
+- `interrupt_task`：`TaskStatus.INTERRUPTED`、`resumeFrom`
+- `resume_task`：`resumeFrom?.phase ?? currentPhase`
+- `cancel_task`：`TaskStatus.FAILED`
 
 ---
 
@@ -395,6 +517,14 @@ flowchart LR
 
 所以当前策略不是“任务结束时统一保存”，而是“每次关键事件都刷新快照”。
 
+关键代码对应：
+
+- `更新 TaskState`：`handleIntakeEvent()` 内各个 `case`
+- `saveTaskState`：`artifactManager.saveTaskState(...)`
+- `artifact_created`：`createWorkflowEvent("artifact_created", ...)`
+- `写 EventLogger`：`eventLogger.append(workflowEvent)`
+- `emit workflow_event`：`eventEmitter.emit("workflow_event", workflowEvent)`
+
 ---
 
 ## 14. 局部图：CLI 事件渲染链
@@ -422,6 +552,15 @@ flowchart TD
 - `TaskState` 摘要
 
 之所以展示得比较全，是因为当前阶段的目标不是做精简 UI，而是先保证 CLI 可观测性和可验收性。
+
+关键代码对应：
+
+- `emit workflow_event`：`eventEmitter.emit("workflow_event", workflowEvent)`
+- `IntakeAgent.attachRuntime`：`attachRuntime()`
+- `formatWorkflowEvent`：`formatWorkflowEvent()`
+- `append workflowOutputBuffer`：`workflowOutputBuffer.push(...)`
+- `CLI printLines`：`printLines()`
+- `TaskState 摘要`：`formatTaskStateSummary()`
 
 ---
 
@@ -456,6 +595,16 @@ flowchart TD
 
 如果不在入口层拦住，用户会误以为 Intake 有权决定下游 phase 编排。
 
+关键代码对应：
+
+- `normalizeUserIntent`：`normalizeUserIntent()`
+- `isOutOfScopeRequest`：`isOutOfScopeRequest()`
+- `是否引用下游角色`：`OUT_OF_SCOPE_ROLE_PATTERNS`
+- `是否引用 phase`：`OUT_OF_SCOPE_PHASE_PATTERNS`
+- `指令型表达`：`OUT_OF_SCOPE_DIRECTIVE_PATTERNS`
+- `返回 out_of_scope`：`NormalizedIntentType = "out_of_scope"`
+- `统一回复 敬请期待`：`OUT_OF_SCOPE_REPLY`
+
 ---
 
 ## 16. 整体图：当前测试分层
@@ -474,6 +623,14 @@ flowchart LR
 - `agent.test.ts`：守住 Intake 层最关键交互，包括编排确认步骤
 
 这样回归时更容易快速定位问题在哪一层。
+
+关键代码对应：
+
+- `intent.test.ts`：`normalizeUserIntent()`、`isOutOfScopeRequest()`
+- `runtime.test.ts`：`buildRuntimeForNewTask()`、`buildRuntimeForResume()`
+- `agent.test.ts`：`IntakeAgent.handleUserInput()`、`IntakeAgent.handleInterruptSignal()`
+- `orchestration 保留`：`ProjectConfig.orchestration`
+- `编排确认`：`confirm_workflow_orchestration` 相关路径
 
 ---
 
@@ -497,3 +654,15 @@ flowchart TD
 
 这张图是为了防止误解当前交付物范围。  
 本次交付已经是“可运行的 Intake 成品”，但还不是“完整 workflow 引擎”。
+
+关键代码对应：
+
+- `CLI 启动`：`main()`、`IntakeAgent.getBootstrapLines()`
+- `资料追问`：`handlePendingStep()`、`PendingStep`
+- `workflow 编排确认`：`confirmWorkflowOrchestration()`、`handleWorkflowOrchestrationConfirmation()`
+- `Runtime 初始化`：`initializeRuntimeAndStartTask()`、`buildRuntimeForNewTask()`
+- `事件桥接`：`dispatchRuntimeEvent()`、`handleIntakeEvent()`
+- `中断恢复`：`handleInterruptSignal()`、`resumeTask()`、`buildRuntimeForResume()`
+- `边界守卫`：`normalizeUserIntent()`、`isOutOfScopeRequest()`
+- `未完成的 Clarify/Plan/Build 执行`：当前仍由 `DefaultWorkflowController` 占位事件模拟
+- `多套 orchestration profile`：当前只有 `createDefaultWorkflowOrchestration()`
