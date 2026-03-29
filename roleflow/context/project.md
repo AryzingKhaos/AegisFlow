@@ -87,6 +87,8 @@ AegisFlow 当前包含以下核心角色：
 - **Builder**：执行代码改动
 - **Critic**：执行审查和风险识别
 - **Test Designer**：生成测试点和回归建议
+- **Tester**：执行测试阶段任务并输出测试执行结果
+- **Test Writer**：编写或修改单元测试及相关测试辅助代码
 - **Archivist**（后续）：维护知识和文档一致性
 - **Architect**（后续）：架构师，针对从0到1的项目
 
@@ -130,7 +132,8 @@ flowchart LR
    Role4[Builder]
    Role5[Critic]
    Role6[TestDesigner]
-   Role7[TestWriter]
+   Role7[Tester]
+   Role8[TestWriter]
 
    R -->|TaskState、EventEmitter| L1
    R -->|ArtifactManager、EventEmitter、EventLogger、ProjectConfig| L2
@@ -141,25 +144,35 @@ flowchart LR
    L2 -->|WorkflowEvent| L1
    L2 -->|直接调用| L3
 
-   L3 -->|artifact工件的内容| L2
+   L3 -->|角色执行结果| L2
    L2 -->|artifact工件| F
 
-   L3 -->|用户需求| Role1
-   Role1 -->|artifact完整澄清的用户需求| L3
-   L3 -->|artifact完整澄清的用户需求| Role2
-   Role2 -->|artifact根据需求解释相关代码| L3
-   L3 -->|artifact完整澄清的用户需求 + artifact根据需求解释相关代码| Role3
-   Role3 -->|artifact计划文档| L3
-   L3 -->|artifact计划文档| Role4
+   L2 -->|用户需求| L3
+   L3 -->|执行澄清任务| Role1
+   Role1 -->|artifact完整澄清的用户需求| L2
+   L2 -->|artifact完整澄清的用户需求| L3
+   L3 -->|执行探索任务| Role2
+   Role2 -->|artifact根据需求解释相关代码| L2
+   L2 -->|artifact完整澄清的用户需求 + artifact根据需求解释相关代码| L3
+   L3 -->|执行规划任务| Role3
+   Role3 -->|artifact计划文档| L2
+   L2 -->|artifact计划文档| L3
+   L3 -->|执行实现任务| Role4
    Role4 -->|修改代码| CODE
-   Role4 -->|artifact修改代码总结| L3
-   L3 -->|artifact修改代码总结 + git修改区内容| Role5
-   Role5 -->|artifact代码review报告| L3
-   L3 -->|artifact修改代码总结 + git修改区内容| Role6
-   Role6 -->|artifact代码修改测试建议| L3
-   L3 -->|artifact修改代码总结 + git修改区内容| Role7
-   Role7 -->|添加/修改单元测试| CODE
-   Role7 -->|artifact代码单元测试| L3
+   Role4 -->|artifact修改代码总结| L2
+   L2 -->|artifact修改代码总结 + git修改区内容| L3
+   L3 -->|执行审查任务| Role5
+   Role5 -->|artifact代码review报告| L2
+   L2 -->|artifact修改代码总结 + git修改区内容| L3
+   L3 -->|执行测试设计任务| Role6
+   Role6 -->|artifact代码修改测试建议| L2
+   L2 -->|artifact修改代码总结 + git修改区内容| L3
+   L3 -->|执行测试任务| Role7
+   Role7 -->|artifact测试执行结果| L2
+   L2 -->|artifact修改代码总结 + git修改区内容| L3
+   L3 -->|执行单测编写任务| Role8
+   Role8 -->|添加/修改单元测试| CODE
+   Role8 -->|artifact代码单元测试| L2
 ```
 
 
@@ -169,7 +182,9 @@ sequenceDiagram
   participant U as 用户
   participant IA as IntakeAgent
   participant WF as Workflow
+  participant RRT as RoleRuntime
   participant RR as RoleRegistry
+  participant RD as RoleDefinition
   participant R as Role
   participant AM as ArtifactManager
   participant CODE as 代码库
@@ -181,14 +196,29 @@ sequenceDiagram
 
   %% CLARIFY
   WF->>RR: get(clarifier)
-  WF->>R: run()
-  R-->>WF: result
+  alt 未注册
+    WF->>RR: register(roleDef)
+    WF->>RRT: 构造 RoleRuntime
+    RR->>RD: create(roleRuntime)
+    RD-->>RR: role
+  end
+  RR-->>WF: role
+  WF->>R: run(input, ExecutionContext)
+  R-->>WF: RoleResult
+  WF->>AM: 保存 artifact
+
+  %% EXPLORE
+  WF->>RR: get(explorer)
+  RR-->>WF: role
+  WF->>R: run(input, ExecutionContext)
+  R-->>WF: RoleResult
   WF->>AM: 保存 artifact
 
   %% PLAN
   WF->>RR: get(planner)
-  WF->>R: run()
-  R-->>WF: result
+  RR-->>WF: role
+  WF->>R: run(input, ExecutionContext)
+  R-->>WF: RoleResult
   WF->>AM: 保存 artifact
 
   %% 中断
@@ -200,14 +230,47 @@ sequenceDiagram
 
   %% 恢复（重跑整个 phase）
   WF->>RR: get(planner)
-  WF->>R: run()
-  R-->>WF: result
+  RR-->>WF: role
+  WF->>R: run(input, ExecutionContext)
+  R-->>WF: RoleResult
+  WF->>AM: 保存 artifact
 
   %% BUILD
   WF->>RR: get(builder)
-  WF->>R: run()
-  R-->>WF: patches
-  WF->>CODE: 应用修改
+  RR-->>WF: role
+  WF->>R: run(input, ExecutionContext)
+  R->>CODE: 修改代码
+  R-->>WF: RoleResult
+  WF->>AM: 保存 artifact
+
+  %% REVIEW
+  WF->>RR: get(critic)
+  RR-->>WF: role
+  WF->>R: run(input, ExecutionContext)
+  R-->>WF: RoleResult
+  WF->>AM: 保存 artifact
+
+  %% TEST DESIGN
+  WF->>RR: get(test-designer)
+  RR-->>WF: role
+  WF->>R: run(input, ExecutionContext)
+  R-->>WF: RoleResult
+  WF->>AM: 保存 artifact
+
+  %% TEST
+  WF->>RR: get(tester)
+  RR-->>WF: role
+  WF->>R: run(input, ExecutionContext)
+  R-->>WF: RoleResult
+  WF->>AM: 保存 artifact
+
+  %% UNIT TEST
+  WF->>RR: get(test-writer)
+  RR-->>WF: role
+  WF->>R: run(input, ExecutionContext)
+  R->>CODE: 添加/修改单元测试
+  R-->>WF: RoleResult
+  WF->>AM: 保存 artifact
 
   WF->>WF: status = COMPLETED
 ```
@@ -230,6 +293,14 @@ interface Runtime {
    eventEmitter: EventEmitter; // todos
    eventLogger: EventLogger; // todos
    artifactManager: ArtifactManager; // todos
+   roleRegistry: RoleRegistry; // todos
+}
+
+// 传给 RoleDefinition 的受限运行时视图，用于避免把 Workflow 内部状态机直接暴露给角色
+interface RoleRuntime {
+   projectConfig: ProjectConfig;
+   eventEmitter: EventEmitter; // todos
+   eventLogger: EventLogger; // todos
    roleRegistry: RoleRegistry; // todos
 }
 
@@ -279,7 +350,7 @@ export enum PhaseStatus {
 interface ProjectConfig {
    cwd: string; // 目标项目地址
    artifactPath: string; // 输出artifact的根目录
-   targetProjectRolePromptPath: string; // 目标项目存放角色特定的额外提示词的路径，会自动获取这个路径下的planner.md、builder.md等文件。可能这样的结构不合理，后续再改
+   targetProjectRolePromptPath: string; // 目标项目角色提示词目录加载后的内存值，等价于 roles.promptDir；默认按严格同名文件读取 planner.md、builder.md、critic.md 等。若 roles.overrides.*.extraInstructions 已配置，则优先使用 override 指向的文件；与仓库内置角色文档按追加方式组装，冲突时项目侧职责优先，缺失时回退到仓库内置角色文档
    workflowPhases: Phase[]; // workflow阶段的配置，v0.1版本可以先写死
 }
 
@@ -294,22 +365,34 @@ interface RoleRegistry {
 interface RoleDefinition {
   name: string;
   description?: string;
-  create: (runtime: Runtime) => Role;
+  create: (runtime: RoleRuntime) => Role;
 }
 
 // 具体的、实例化的角色
 interface Role {
    name: string;
    run(input: any, context: ExecutionContext): Promise<RoleResult>
-   // RoleResult 可以先当做 string来用
 }
 
-// 角色运行时的上下文，主要是工具和必要的记录
+// Role 返回的结构化结果
+interface RoleResult {
+  summary: string;
+  artifacts: string[]; // 每个元素都是可直接写入 md 文件的工件内容
+  metadata?: Record<string, any>;
+}
+
+// 提供给 Role 层的只读工件视图，避免角色直接接触 ArtifactManager
+interface ArtifactReader {
+  get(key: string): Promise<string | undefined>;
+  list(phase?: Phase): Promise<string[]>;
+}
+
+// 角色运行时的上下文，主要是只读工具和必要的记录
 interface ExecutionContext {
   taskId: string;
   phase: Phase;
   cwd: string;
-  artifacts: ArtifactManager;
+  artifacts: ArtifactReader;
   projectConfig: ProjectConfig;
 }
 ```

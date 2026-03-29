@@ -11,3 +11,4 @@
 |------|------|------|
 | `default-workflow-intake-layer` | [default-workflow-intake-layer-prd.md](default-workflow-intake-layer-prd.md) | `default-workflow` 的 `Intake` 层需求文档 |
 | `default-workflow-workflow-layer` | [default-workflow-workflow-layer-prd.md](default-workflow-workflow-layer-prd.md) | `default-workflow` 的 `Workflow` 层需求文档 |
+| `default-workflow-role-layer` | [default-workflow-role-layer-prd.md](default-workflow-role-layer-prd.md) | `default-workflow` 的 `Role` 层公共需求文档 |
