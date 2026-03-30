@@ -6,6 +6,7 @@ declare module "node:fs" {
   export interface Dirent {
     name: string;
     isDirectory(): boolean;
+    isFile(): boolean;
   }
 
   export const promises: {
@@ -33,6 +34,7 @@ declare module "node:path" {
     join(...paths: string[]): string;
     resolve(...paths: string[]): string;
     dirname(path: string): string;
+    isAbsolute(path: string): boolean;
   }
 
   const path: PathModule;
@@ -83,3 +85,5 @@ declare const console: {
   log(message?: unknown, ...optionalParams: unknown[]): void;
   error(message?: unknown, ...optionalParams: unknown[]): void;
 };
+
+declare const __dirname: string;

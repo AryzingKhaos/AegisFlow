@@ -5,10 +5,12 @@ import {
   DEFAULT_WORKFLOW_PHASES,
   DEFAULT_WORKFLOW_PROFILE_ID,
   DEFAULT_WORKFLOW_PROFILE_LABEL,
+  DEFAULT_ROLE_PROMPT_DIR_NAME,
   SUPPORTED_WORKFLOW_TYPES,
 } from "./constants";
 import type {
   ProjectConfig,
+  RoleName,
   TaskState,
   WorkflowPhaseConfig,
   WorkflowSelection,
@@ -101,10 +103,19 @@ export function createProjectConfig(input: {
   workflowPhases?: WorkflowPhaseConfig[];
   workflowProfileId?: string;
   workflowProfileLabel?: string;
+  targetProjectRolePromptPath?: string;
+  rolePromptOverrides?: Partial<Record<RoleName, string>>;
 }): ProjectConfig {
+  const resolvedProjectDir = path.resolve(input.projectDir);
+
   return {
-    projectDir: path.resolve(input.projectDir),
+    projectDir: resolvedProjectDir,
     artifactDir: path.resolve(input.artifactDir),
+    targetProjectRolePromptPath: path.resolve(
+      resolvedProjectDir,
+      input.targetProjectRolePromptPath ?? DEFAULT_ROLE_PROMPT_DIR_NAME,
+    ),
+    rolePromptOverrides: { ...(input.rolePromptOverrides ?? {}) },
     workflow: input.workflow,
     workflowProfileId: input.workflowProfileId ?? DEFAULT_WORKFLOW_PROFILE_ID,
     workflowProfileLabel:

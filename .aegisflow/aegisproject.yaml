@@ -1,0 +1,53 @@
+project:
+  name: "AegisFlow"
+  description: "AegisFlow 项目配置"
+
+paths:
+  cwd: "."
+  artifactDir: ".aegisflow/artifacts"
+  snapshotDir: ".aegisflow/state"
+  logDir: ".aegisflow/logs"
+
+workflow:
+  type: "default-workflow"
+  phases:
+    - name: "clarify"
+      hostRole: "clarifier"
+      needApproval: false
+    - name: "explore"
+      hostRole: "explorer"
+      needApproval: false
+    - name: "plan"
+      hostRole: "planner"
+      needApproval: true
+    - name: "build"
+      hostRole: "builder"
+      needApproval: false
+    - name: "review"
+      hostRole: "critic"
+      needApproval: true
+    - name: "test-design"
+      hostRole: "test-designer"
+      needApproval: false
+    - name: "unit-test"
+      hostRole: "test-writer"
+      needApproval: false
+    - name: "test"
+      hostRole: "tester"
+      needApproval: false
+
+roles:
+  prototypeDir: "/Users/aaron/code/roleflow/roles"
+  promptDir: ".aegisflow/roles"
+
+artifacts:
+  structure: "by-phase"
+  format: "md"
+
+runtime:
+  maxRetries: 2
+  timeoutMs: 300000
+
+logging:
+  level: "info"
+  saveToFile: true

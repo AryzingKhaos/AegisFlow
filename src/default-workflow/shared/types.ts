@@ -71,6 +71,8 @@ export interface WorkflowPhaseConfig {
 export interface ProjectConfig {
   projectDir: string;
   artifactDir: string;
+  targetProjectRolePromptPath: string;
+  rolePromptOverrides: Partial<Record<RoleName, string>>;
   workflow: WorkflowSelection;
   workflowProfileId: string;
   workflowProfileLabel: string;
@@ -133,19 +135,31 @@ export interface TaskArtifact {
   content: string;
 }
 
+export interface ArtifactReader {
+  get(key: string): Promise<string | undefined>;
+  list(phase?: Phase): Promise<string[]>;
+}
+
 export interface RoleResult {
   summary: string;
-  artifacts: TaskArtifact[];
+  artifacts: string[];
   metadata?: Record<string, unknown>;
+}
+
+export interface RoleCapabilityProfile {
+  mode: "analysis" | "delivery" | "verification";
+  sideEffects: "forbidden" | "allowed";
+  allowedActions: string[];
+  focus: string;
 }
 
 export interface ExecutionContext {
   taskId: string;
   phase: Phase;
   cwd: string;
+  artifacts: ArtifactReader;
   projectConfig: ProjectConfig;
-  taskState: TaskState;
-  latestInput?: string;
+  roleCapabilityProfile: RoleCapabilityProfile;
 }
 
 export interface EventLogger {
@@ -157,27 +171,38 @@ export interface ArtifactManager {
   saveTaskState(taskState: TaskState): Promise<string>;
   saveTaskContext(context: PersistedTaskContext): Promise<string>;
   saveArtifact(taskId: string, artifact: TaskArtifact): Promise<string>;
+  createArtifactReader(taskId: string): ArtifactReader;
   loadTaskState(taskId: string): Promise<TaskState>;
   loadTaskContext(taskId: string): Promise<PersistedTaskContext>;
   findLatestResumableTaskId(): Promise<string | null>;
 }
 
-export interface RoleDescriptor {
-  name: RoleName;
-  description: string;
-  placeholder: boolean;
+export interface RoleRuntime {
+  projectConfig: ProjectConfig;
+  eventEmitter: EventEmitter;
+  eventLogger: EventLogger;
+  roleRegistry: RoleRegistry;
+  roleCapabilityProfiles: Readonly<Record<RoleName, RoleCapabilityProfile>>;
 }
 
 export interface Role {
   name: RoleName;
   description: string;
   placeholder: boolean;
+  capabilityProfile: RoleCapabilityProfile;
   run(input: string, context: ExecutionContext): Promise<RoleResult>;
 }
 
+export interface RoleDefinition {
+  name: RoleName;
+  description?: string;
+  create(roleRuntime: RoleRuntime): Role;
+}
+
 export interface RoleRegistry {
+  register(roleDef: RoleDefinition): void;
   get(name: RoleName): Role;
-  list(): RoleDescriptor[];
+  list(): string[];
 }
 
 export interface Runtime {

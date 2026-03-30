@@ -2,7 +2,6 @@ import type { EventEmitter } from "node:events";
 import type {
   ArtifactManager,
   EventLogger,
-  ExecutionContext,
   IntakeEvent,
   Phase,
   ProjectConfig,
@@ -108,15 +107,17 @@ export class DefaultWorkflowController implements WorkflowController {
 
   public async runRole(roleName: RoleName, input: string): Promise<RoleResult> {
     const role = this.dependencies.roleRegistry.get(roleName);
-    // 传给角色的是 TaskState 快照而不是可变引用，
-    // 防止角色越权修改 Workflow 的主状态机。
-    const context: ExecutionContext = {
+    // Workflow 只把最小执行上下文传给角色，
+    // 不再把 TaskState、latestInput 或完整 ArtifactManager 暴露到 Role 层。
+    const context = {
       taskId: this.dependencies.taskState.taskId,
       phase: this.dependencies.taskState.currentPhase,
       cwd: this.dependencies.projectConfig.projectDir,
+      artifacts: this.dependencies.artifactManager.createArtifactReader(
+        this.dependencies.taskState.taskId,
+      ),
       projectConfig: this.dependencies.projectConfig,
-      taskState: this.cloneTaskState(),
-      latestInput: await this.loadLatestInput(),
+      roleCapabilityProfile: role.capabilityProfile,
     };
 
     return role.run(input, context);
@@ -419,22 +420,37 @@ export class DefaultWorkflowController implements WorkflowController {
       },
     );
 
-    for (const artifact of roleResult.artifacts) {
-      // Role 只返回结构化结果，真正的工件落盘由 Workflow 统一调度。
+    for (const [artifactIndex, artifactContent] of roleResult.artifacts.entries()) {
+      // RoleResult.artifacts 只暴露工件内容字符串；
+      // 真正的命名、分目录和落盘时机仍由 Workflow 统一决定。
       const artifactPath = await this.dependencies.artifactManager.saveArtifact(
         this.dependencies.taskState.taskId,
-        artifact,
+        {
+          key: createArtifactKey(
+            phaseConfig.name,
+            phaseConfig.hostRole,
+            artifactIndex,
+          ),
+          phase: phaseConfig.name,
+          roleName: phaseConfig.hostRole,
+          title: createArtifactTitle(
+            phaseConfig.name,
+            phaseConfig.hostRole,
+            artifactIndex,
+          ),
+          content: artifactContent,
+        },
       );
 
       await this.pushEvent(
         workflowEvents,
         "artifact_created",
-        `工件 ${artifact.key} 已创建。`,
+        `阶段 ${phaseConfig.name} 的第 ${artifactIndex + 1} 个工件已创建。`,
         {
-          phase: artifact.phase,
-          roleName: artifact.roleName,
+          phase: phaseConfig.name,
+          roleName: phaseConfig.hostRole,
           artifactPath,
-          artifactTitle: artifact.title,
+          artifactIndex,
         },
       );
     }
@@ -588,11 +604,6 @@ export class DefaultWorkflowController implements WorkflowController {
     await this.dependencies.artifactManager.saveTaskContext(context);
   }
 
-  private async loadLatestInput(): Promise<string | undefined> {
-    const context = await this.loadTaskContextSafe();
-    return context?.latestInput;
-  }
-
   private async syncPersistedContext(): Promise<void> {
     const context = await this.loadTaskContextSafe();
 
@@ -732,4 +743,20 @@ export class DefaultWorkflowController implements WorkflowController {
       return undefined;
     }
   }
+}
+
+function createArtifactKey(
+  phase: Phase,
+  roleName: RoleName,
+  artifactIndex: number,
+): string {
+  return `${phase}-${roleName}-${artifactIndex + 1}`;
+}
+
+function createArtifactTitle(
+  phase: Phase,
+  roleName: RoleName,
+  artifactIndex: number,
+): string {
+  return `${phase}-${roleName}-${artifactIndex + 1}`;
 }

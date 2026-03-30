@@ -8,6 +8,7 @@ const tempDirs: string[] = [];
 
 beforeEach(() => {
   process.env.OPENAI_API_KEY = "dummy";
+  process.env.AEGISFLOW_ROLE_EXECUTION_MODE = "stub";
 });
 
 afterEach(async () => {

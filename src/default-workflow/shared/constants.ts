@@ -7,8 +7,11 @@ import type {
 
 export const DEFAULT_INTAKE_MODEL = "gpt5.4";
 export const DEFAULT_INTAKE_BASE_URL = "https://co.yes.vg/v1";
+export const DEFAULT_ROLE_MODEL = "gpt5.4";
+export const DEFAULT_ROLE_BASE_URL = "https://co.yes.vg/v1";
 export const DEFAULT_WORKFLOW_ID = "default-workflow";
 export const DEFAULT_ARTIFACT_DIR_NAME = ".aegisflow/artifacts";
+export const DEFAULT_ROLE_PROMPT_DIR_NAME = ".aegisflow/roles";
 export const INTAKE_STATE_DIR_NAME = ".aegisflow";
 export const INTAKE_RESUME_INDEX_FILE = "latest-task.json";
 export const DEFAULT_WORKFLOW_PROFILE_ID = "default-v0.1";

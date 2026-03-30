@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { FileArtifactManager } from "../persistence/task-store";
 import {
   buildRuntimeForNewTask,
@@ -18,7 +18,8 @@ import type {
   EventLogger,
   ExecutionContext,
   Role,
-  RoleDescriptor,
+  RoleCapabilityProfile,
+  RoleDefinition,
   RoleName,
   RoleRegistry,
   RoleResult,
@@ -29,6 +30,11 @@ import { TaskStatus } from "../shared/types";
 import { DefaultWorkflowController } from "../workflow/controller";
 
 const tempDirs: string[] = [];
+
+beforeEach(() => {
+  process.env.OPENAI_API_KEY = "dummy";
+  process.env.AEGISFLOW_ROLE_EXECUTION_MODE = "stub";
+});
 
 afterEach(async () => {
   await Promise.all(
@@ -174,14 +180,10 @@ describe("workflow runtime", () => {
       description: "真实需求描述",
       createdAt: Date.now(),
       lastRuntimeId: "runtime_approval_input_case",
-      latestInput: "真实需求描述",
       projectConfig,
     });
 
-    const observedInputs: Array<{
-      input: string;
-      latestInput?: string;
-    }> = [];
+    const observedInputs: string[] = [];
     const controller = new DefaultWorkflowController({
       taskState,
       projectConfig,
@@ -196,10 +198,8 @@ describe("workflow runtime", () => {
         builder: createRole(
           "builder",
           async (input: string, context: ExecutionContext) => {
-            observedInputs.push({
-              input,
-              latestInput: context.latestInput,
-            });
+            observedInputs.push(input);
+            expect(await context.artifacts.list()).toEqual([]);
 
             return {
               summary: "builder done",
@@ -214,12 +214,7 @@ describe("workflow runtime", () => {
     await controller.resume(taskState.taskId, "批准继续");
 
     expect(taskState.status).toBe(TaskStatus.COMPLETED);
-    expect(observedInputs).toEqual([
-      {
-        input: "",
-        latestInput: "真实需求描述",
-      },
-    ]);
+    expect(observedInputs).toEqual([""]);
   });
 
   it("waits for user input on paused phases and resumes from the same phase", async () => {
@@ -266,18 +261,11 @@ describe("workflow runtime", () => {
           name: "clarifier",
           description: "clarifier",
           placeholder: false,
+          capabilityProfile: createCapabilityProfile("clarifier"),
           async run(input: string, context: ExecutionContext): Promise<RoleResult> {
             return {
               summary: `clarifier:${input}`,
-              artifacts: [
-                {
-                  key: "clarify-result",
-                  phase: context.phase,
-                  roleName: "clarifier",
-                  title: "clarify-result",
-                  content: input,
-                },
-              ],
+              artifacts: [`# clarify-result\n\nphase=${context.phase}\n\n${input}`],
             };
           },
         },
@@ -361,6 +349,7 @@ describe("workflow runtime", () => {
           name: "clarifier",
           description: "clarifier",
           placeholder: false,
+          capabilityProfile: createCapabilityProfile("clarifier"),
           async run(): Promise<RoleResult> {
             throw new Error("clarify exploded");
           },
@@ -418,7 +407,6 @@ describe("workflow runtime", () => {
       description: "最终审批用例",
       createdAt: Date.now(),
       lastRuntimeId: "runtime_final_approval_case",
-      latestInput: "最终审批用例",
       projectConfig,
     });
 
@@ -488,7 +476,6 @@ describe("workflow runtime", () => {
       description: "取消用例",
       createdAt: Date.now(),
       lastRuntimeId: "runtime_cancel_case",
-      latestInput: "取消用例",
       projectConfig,
     });
 
@@ -580,12 +567,21 @@ class TestRoleRegistry implements RoleRegistry {
     return role;
   }
 
-  public list(): RoleDescriptor[] {
-    return [...this.roles.values()].map((role) => ({
-      name: role.name,
-      description: role.description,
-      placeholder: role.placeholder,
-    }));
+  public register(roleDef: RoleDefinition): void {
+    this.roles.set(
+      roleDef.name,
+      roleDef.create({
+        projectConfig: {} as never,
+        eventEmitter: new EventEmitter(),
+        eventLogger: new MemoryEventLogger(),
+        roleRegistry: this,
+        roleCapabilityProfiles: {} as never,
+      }),
+    );
+  }
+
+  public list(): string[] {
+    return [...this.roles.keys()];
   }
 }
 
@@ -597,7 +593,28 @@ function createRole(
     name,
     description: name,
     placeholder: false,
+    capabilityProfile: createCapabilityProfile(name),
     run,
+  };
+}
+
+function createCapabilityProfile(name: RoleName): RoleCapabilityProfile {
+  return {
+    mode:
+      name === "builder" || name === "test-writer"
+        ? "delivery"
+        : name === "tester" || name === "test-designer"
+          ? "verification"
+          : "analysis",
+    sideEffects:
+      name === "builder" ||
+      name === "tester" ||
+      name === "test-designer" ||
+      name === "test-writer"
+        ? "allowed"
+        : "forbidden",
+    allowedActions: [name],
+    focus: name,
   };
 }
 

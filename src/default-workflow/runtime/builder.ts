@@ -18,7 +18,7 @@ import type {
   WorkflowPhaseConfig,
   WorkflowSelection,
 } from "../shared/types";
-import { JsonlEventLogger, StaticRoleRegistry } from "./dependencies";
+import { DefaultRoleRegistry, JsonlEventLogger } from "./dependencies";
 
 export interface BuildNewRuntimeInput {
   projectDir: string;
@@ -73,7 +73,11 @@ export async function buildRuntimeForNewTask(
     path.join(projectConfig.artifactDir, "workflow-events.jsonl"),
   );
   const artifactManager = new FileArtifactManager(projectConfig);
-  const roleRegistry = new StaticRoleRegistry();
+  const roleRegistry = new DefaultRoleRegistry({
+    projectConfig,
+    eventEmitter,
+    eventLogger,
+  });
   const taskState = createInitialTaskState(
     taskId,
     title,
@@ -116,8 +120,9 @@ export async function buildRuntimeForNewTask(
     runtime,
     persistedContext,
     capabilityWarnings: [
-      "RoleRegistry 当前仍使用受控占位角色，真实角色职责链路尚未全部接入。",
-      "tester 角色文档仍缺失；test phase 目前仅能通过占位角色执行并显式暴露该缺口。",
+      "RoleRegistry 已切换为 RoleDefinition + RoleRuntime 的受限注入机制，默认角色会通过统一 Agent 执行链路运行。",
+      "如需离线验证，可设置 AEGISFLOW_ROLE_EXECUTION_MODE=stub；线上默认仍走真实模型调用。",
+      "tester 当前按最小职责说明接入，后续仍可继续补充更细测试执行策略。",
     ],
   };
 }
@@ -140,7 +145,11 @@ export async function buildRuntimeForResume(
     path.join(projectConfig.artifactDir, "workflow-events.jsonl"),
   );
   const artifactManager = new FileArtifactManager(projectConfig);
-  const roleRegistry = new StaticRoleRegistry();
+  const roleRegistry = new DefaultRoleRegistry({
+    projectConfig,
+    eventEmitter,
+    eventLogger,
+  });
   // 恢复时以磁盘快照为准加载 TaskState，
   // 而不是沿用 persistedContext 中可能已经过期的内存副本。
   const taskState = await artifactManager.loadTaskState(
@@ -176,7 +185,7 @@ export async function buildRuntimeForResume(
     persistedContext,
     capabilityWarnings: [
       "Runtime 已根据持久化快照重建，没有复用上一次内存实例。",
-      "RoleRegistry 仍为占位实现；真实角色执行结果尚未完全接入。",
+      "RoleRegistry 会在当前 Runtime 内懒创建角色实例；默认角色执行会进入统一 Agent 调用链。",
     ],
   };
 }

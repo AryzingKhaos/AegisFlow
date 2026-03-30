@@ -346,11 +346,11 @@ export enum PhaseStatus {
    DONE = 'done',
 }
 
-// 主要是从aegisproject.yaml中读取的内容
+// 主要是从 .aegisflow/aegisproject.yaml 中读取的内容
 interface ProjectConfig {
    cwd: string; // 目标项目地址
    artifactPath: string; // 输出artifact的根目录
-   targetProjectRolePromptPath: string; // 目标项目角色提示词目录加载后的内存值，等价于 roles.promptDir；默认按严格同名文件读取 planner.md、builder.md、critic.md 等。若 roles.overrides.*.extraInstructions 已配置，则优先使用 override 指向的文件；与仓库内置角色文档按追加方式组装，冲突时项目侧职责优先，缺失时回退到仓库内置角色文档
+   targetProjectRolePromptPath: string; // 目标项目角色提示词目录加载后的内存值，等价于 roles.promptDir；默认按严格同名文件读取 planner.md、builder.md、critic.md 等。若 roles.overrides.*.extraInstructions 已配置，则优先使用 override 指向的文件；与角色原型文档按追加方式组装，冲突时项目侧职责优先，缺失时回退到角色原型文档
    workflowPhases: Phase[]; // workflow阶段的配置，v0.1版本可以先写死
 }
 
@@ -513,7 +513,7 @@ type LogEvent = {
 
 
 ## 7.配置文件示例
-aegisproject.yaml文件示例：
+.aegisflow/aegisproject.yaml 文件示例：
 ```yaml
 project:
   name: "project-name"
@@ -562,13 +562,11 @@ workflow:
 	  needApproval: true
 
 roles:
-  promptDir: ".aegis/prompts" # 项目级 prompt 覆盖目录
+  prototypeDir: "/Users/aaron/code/roleflow/roles" # 角色原型目录
+  promptDir: ".aegisflow/roles" # AegisFlow 项目级角色提示词目录
   overrides:
-    planner:
-      extraInstructions: ".aegis/prompts/planner_extra.md"
-
-    builder:
-      extraInstructions: ".aegis/prompts/builder_extra.md"
+    critic:
+      extraInstructions: ".aegisflow/roles/critic.md"
 
 artifacts:
   structure: "by-phase" # by-phase / flat

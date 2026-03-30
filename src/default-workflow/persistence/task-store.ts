@@ -2,6 +2,8 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import type {
   ArtifactManager,
+  ArtifactReader,
+  Phase,
   PersistedTaskContext,
   ProjectConfig,
   TaskArtifact,
@@ -86,6 +88,13 @@ export class FileArtifactManager implements ArtifactManager {
     return artifactFilePath;
   }
 
+  public createArtifactReader(taskId: string): ArtifactReader {
+    return {
+      get: async (key: string) => this.readArtifactContent(taskId, key),
+      list: async (phase?: Phase) => this.listArtifactKeys(taskId, phase),
+    };
+  }
+
   public async loadTaskState(taskId: string): Promise<TaskState> {
     return readJsonFile<TaskState>(getTaskStateJsonPath(this.projectConfig, taskId));
   }
@@ -136,6 +145,86 @@ export class FileArtifactManager implements ArtifactManager {
       return null;
     }
   }
+
+  private async listArtifactKeys(
+    taskId: string,
+    phase?: Phase,
+  ): Promise<string[]> {
+    return listArtifactKeysFromRoot(getArtifactsRoot(this.projectConfig, taskId), phase);
+  }
+
+  private async readArtifactContent(
+    taskId: string,
+    key: string,
+  ): Promise<string | undefined> {
+    return readArtifactByKey(getArtifactsRoot(this.projectConfig, taskId), key);
+  }
+}
+
+async function listArtifactKeysFromRoot(
+  artifactsRoot: string,
+  phase?: Phase,
+): Promise<string[]> {
+  if (phase) {
+    try {
+      const entries = await fs.readdir(path.join(artifactsRoot, phase), {
+        withFileTypes: true,
+      });
+
+      return entries
+        .filter((entry) => entry.isFile() && entry.name.endsWith(".md"))
+        .map((entry) => entry.name.replace(/\.md$/, ""));
+    } catch {
+      return [];
+    }
+  }
+
+  try {
+    const phaseEntries = await fs.readdir(artifactsRoot, { withFileTypes: true });
+    const keys: string[] = [];
+
+    for (const phaseEntry of phaseEntries) {
+      if (!phaseEntry.isDirectory()) {
+        continue;
+      }
+
+      const files = await listArtifactKeysFromRoot(
+        artifactsRoot,
+        phaseEntry.name as Phase,
+      );
+      keys.push(...files.map((file) => `${phaseEntry.name}/${file}`));
+    }
+
+    return keys;
+  } catch {
+    return [];
+  }
+}
+
+async function readArtifactByKey(
+  artifactsRoot: string,
+  key: string,
+): Promise<string | undefined> {
+  const [phase, localKey] = key.includes("/") ? key.split("/", 2) : [undefined, key];
+
+  if (phase && localKey) {
+    return readUtf8IfExists(path.join(artifactsRoot, phase, `${localKey}.md`));
+  }
+
+  const allKeys = await listArtifactKeysFromRoot(artifactsRoot);
+
+  for (const artifactKey of allKeys) {
+    if (!artifactKey.endsWith(`/${key}`)) {
+      continue;
+    }
+
+    const [matchedPhase, matchedLocalKey] = artifactKey.split("/", 2);
+    return readUtf8IfExists(
+      path.join(artifactsRoot, matchedPhase, `${matchedLocalKey}.md`),
+    );
+  }
+
+  return undefined;
 }
 
 function renderTaskStateMarkdown(taskState: TaskState): string {
@@ -159,4 +248,12 @@ function renderTaskStateMarkdown(taskState: TaskState): string {
 async function readJsonFile<T>(filePath: string): Promise<T> {
   const content = await fs.readFile(filePath, "utf8");
   return JSON.parse(content) as T;
+}
+
+async function readUtf8IfExists(filePath: string): Promise<string | undefined> {
+  try {
+    return await fs.readFile(filePath, "utf8");
+  } catch {
+    return undefined;
+  }
 }
