@@ -12,4 +12,5 @@
 | `default-workflow-intake-layer` | [default-workflow-intake-layer-prd.md](default-workflow-intake-layer-prd.md) | `default-workflow` 的 `Intake` 层需求文档 |
 | `default-workflow-workflow-layer` | [default-workflow-workflow-layer-prd.md](default-workflow-workflow-layer-prd.md) | `default-workflow` 的 `Workflow` 层需求文档 |
 | `default-workflow-role-layer` | [default-workflow-role-layer-prd.md](default-workflow-role-layer-prd.md) | `default-workflow` 的 `Role` 层公共需求文档 |
+| `default-workflow-role-codex-agent` | [default-workflow-role-codex-agent-prd.md](default-workflow-role-codex-agent-prd.md) | `default-workflow` 的角色 Codex Agent 运行需求文档 |
 | `default-workflow-role-prompt-bootstrap` | [default-workflow-role-prompt-bootstrap-prd.md](default-workflow-role-prompt-bootstrap-prd.md) | `default-workflow` 的角色原型与项目侧提示词装载需求文档 |

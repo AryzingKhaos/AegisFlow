@@ -4,6 +4,8 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { FileArtifactManager } from "../persistence/task-store";
+import { resolveRoleCodexConfig } from "../role/config";
+import { CodexCliRoleAgentExecutor } from "../role/executor";
 import { buildRolePrompt } from "../role/prompts";
 import { executeRoleAgent, type RoleAgentBootstrap } from "../role/model";
 import {
@@ -272,6 +274,7 @@ describe("role layer", () => {
   });
 
   it("executes role output through the agent pipeline instead of local placeholder text", async () => {
+    let observedPrompt = "";
     const projectConfig = createProjectConfig({
       projectDir: "/tmp/project",
       artifactDir: "/tmp/project/.aegisflow/artifacts",
@@ -285,30 +288,33 @@ describe("role layer", () => {
       ],
     });
     const fakeBootstrap: RoleAgentBootstrap = {
-      llm: {
-        invoke: async (prompt: string) => ({
-          content: JSON.stringify({
+      executor: {
+        executorKind: "fake-codex-executor",
+        async execute({ prompt }) {
+          observedPrompt = prompt;
+
+          return JSON.stringify({
             summary: prompt.includes("design_plan")
               ? "planner 已通过 agent 输出计划"
               : "unexpected",
             artifacts: ["# plan artifact\n\nfrom-agent"],
             metadata: {
-              source: "fake-llm",
+              source: "fake-codex-executor",
             },
-          }),
-        }),
-      } as unknown as RoleAgentBootstrap["llm"],
+          });
+        },
+      },
       prompt: "SYSTEM_PROMPT",
       promptSources: ["builtin/planner.md"],
       promptWarnings: [],
       config: {
-        model: "fake-model",
+        model: "codex-5.4",
         baseUrl: "http://localhost",
         apiKey: "dummy",
         executionMode: "agent",
         sources: {
-          model: "default",
-          baseUrl: "default",
+          model: "AEGISFLOW_ROLE_CODEX_MODEL",
+          baseUrl: "AEGISFLOW_ROLE_CODEX_BASE_URL",
           apiKey: "OPENAI_API_KEY",
           executionMode: "default",
         },
@@ -345,8 +351,177 @@ describe("role layer", () => {
 
     expect(result.summary).toBe("planner 已通过 agent 输出计划");
     expect(result.artifacts).toEqual(["# plan artifact\n\nfrom-agent"]);
-    expect(result.metadata?.source).toBe("fake-llm");
+    expect(result.metadata?.source).toBe("fake-codex-executor");
     expect(result.metadata?.executionMode).toBe("agent");
+    expect(result.metadata?.agentExecutor).toBe("fake-codex-executor");
+    expect(result.metadata?.agentModel).toBe("codex-5.4");
+    expect(observedPrompt).toContain("SYSTEM_PROMPT");
+    expect(observedPrompt).toContain("design_plan");
+  });
+
+  it("executes codex cli with isolated output files and returns the written content", async () => {
+    const root = await createTempProject();
+    const projectDir = path.join(root, "project");
+    await mkdir(projectDir, { recursive: true });
+
+    const observedOutputPaths: string[] = [];
+    const observedSandboxes: string[] = [];
+    const executor = new CodexCliRoleAgentExecutor({
+      async runCommand(_file, args) {
+        const outputPath = args[args.indexOf("--output-last-message") + 1];
+        const sandboxValue = args[args.indexOf("--sandbox") + 1];
+        observedOutputPaths.push(outputPath);
+        observedSandboxes.push(sandboxValue);
+        await writeFile(outputPath, `result-${observedOutputPaths.length}`, "utf8");
+      },
+    });
+
+    const baseContext = {
+      phase: "build" as const,
+      cwd: projectDir,
+      projectConfig: createProjectConfig({
+        projectDir,
+        artifactDir: path.join(root, "artifacts"),
+        workflow: createWorkflowSelection("bugfix"),
+      }),
+      roleCapabilityProfile: createCapabilityProfile("builder"),
+      artifacts: {
+        async get() {
+          return undefined;
+        },
+        async list() {
+          return [];
+        },
+      },
+    };
+
+    const firstResult = await executor.execute({
+      roleName: "builder",
+      prompt: "FIRST_PROMPT",
+      context: {
+        ...baseContext,
+        taskId: "task-a",
+      },
+      executionProfile: createCapabilityProfile("builder"),
+      config: {
+        model: "codex-5.4",
+        baseUrl: "https://api.openai.com/v1",
+        apiKey: "dummy",
+        executionMode: "agent",
+        sources: {
+          model: "default",
+          baseUrl: "default",
+          apiKey: "OPENAI_API_KEY",
+          executionMode: "default",
+        },
+      },
+    });
+
+    const secondResult = await executor.execute({
+      roleName: "builder",
+      prompt: "SECOND_PROMPT",
+      context: {
+        ...baseContext,
+        taskId: "task-b",
+      },
+      executionProfile: createCapabilityProfile("builder"),
+      config: {
+        model: "codex-5.4",
+        baseUrl: "https://api.openai.com/v1",
+        apiKey: "dummy",
+        executionMode: "agent",
+        sources: {
+          model: "default",
+          baseUrl: "default",
+          apiKey: "OPENAI_API_KEY",
+          executionMode: "default",
+        },
+      },
+    });
+
+    expect(firstResult).toBe("result-1");
+    expect(secondResult).toBe("result-2");
+    expect(observedOutputPaths).toHaveLength(2);
+    expect(new Set(observedOutputPaths).size).toBe(2);
+    expect(observedOutputPaths.every((filePath) => filePath.includes("/.aegisflow/runtime-cache/"))).toBe(true);
+    expect(observedSandboxes).toEqual(["workspace-write", "workspace-write"]);
+  });
+
+  it("wraps codex cli execution failures with role executor context", async () => {
+    const root = await createTempProject();
+    const projectDir = path.join(root, "project");
+    await mkdir(projectDir, { recursive: true });
+
+    const executor = new CodexCliRoleAgentExecutor({
+      async runCommand() {
+        throw new Error("codex exited with code 1");
+      },
+    });
+
+    await expect(
+      executor.execute({
+        roleName: "critic",
+        prompt: "PROMPT",
+        context: {
+          taskId: "task-error",
+          phase: "review",
+          cwd: projectDir,
+          projectConfig: createProjectConfig({
+            projectDir,
+            artifactDir: path.join(root, "artifacts"),
+            workflow: createWorkflowSelection("bugfix"),
+          }),
+          roleCapabilityProfile: createCapabilityProfile("critic"),
+          artifacts: {
+            async get() {
+              return undefined;
+            },
+            async list() {
+              return [];
+            },
+          },
+        },
+        executionProfile: createCapabilityProfile("critic"),
+        config: {
+          model: "codex-5.4",
+          baseUrl: "https://api.openai.com/v1",
+          apiKey: "dummy",
+          executionMode: "agent",
+          sources: {
+            model: "default",
+            baseUrl: "default",
+            apiKey: "OPENAI_API_KEY",
+            executionMode: "default",
+          },
+        },
+      }),
+    ).rejects.toThrow("Role Codex agent execution failed: codex exited with code 1");
+  });
+
+  it("resolves codex-specific role config from centralized environment variables", () => {
+    const config = resolveRoleCodexConfig({
+      OPENAI_API_KEY: "dummy",
+      AEGISFLOW_ROLE_CODEX_MODEL: "codex-5.4-custom",
+      AEGISFLOW_ROLE_CODEX_BASE_URL: "https://example.test/v1",
+    });
+
+    expect(config.model).toBe("codex-5.4-custom");
+    expect(config.baseUrl).toBe("https://example.test/v1");
+    expect(config.apiKey).toBe("dummy");
+    expect(config.sources.model).toBe("AEGISFLOW_ROLE_CODEX_MODEL");
+    expect(config.sources.baseUrl).toBe("AEGISFLOW_ROLE_CODEX_BASE_URL");
+    expect(config.sources.apiKey).toBe("OPENAI_API_KEY");
+  });
+
+  it("defaults role codex config to codex 5.4 and OpenAI base url", () => {
+    const config = resolveRoleCodexConfig({
+      OPENAI_API_KEY: "dummy",
+    });
+
+    expect(config.model).toBe("codex-5.4");
+    expect(config.baseUrl).toBe("https://api.openai.com/v1");
+    expect(config.sources.model).toBe("default");
+    expect(config.sources.baseUrl).toBe("default");
   });
 
   it("passes read-only ExecutionContext into roles and persists string artifacts", async () => {

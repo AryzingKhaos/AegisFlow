@@ -1,4 +1,3 @@
-import { ChatOpenAI } from "@langchain/openai";
 import type {
   ArtifactReader,
   ExecutionContext,
@@ -7,15 +6,19 @@ import type {
   RoleResult,
   RoleRuntime,
 } from "../shared/types";
-import { resolveRoleModelConfig } from "./config";
+import { resolveRoleCodexConfig } from "./config";
+import {
+  CodexCliRoleAgentExecutor,
+  type RoleAgentExecutor,
+} from "./executor";
 import { buildRolePrompt } from "./prompts";
 
 export interface RoleAgentBootstrap {
-  llm: ChatOpenAI;
+  executor: RoleAgentExecutor;
   prompt: string;
   promptSources: string[];
   promptWarnings: string[];
-  config: ReturnType<typeof resolveRoleModelConfig>;
+  config: ReturnType<typeof resolveRoleCodexConfig>;
 }
 
 interface VisibleArtifact {
@@ -29,20 +32,13 @@ export async function initializeRoleAgent(
 ): Promise<RoleAgentBootstrap> {
   // 角色初始化只依赖 RoleRuntime 暴露的受限配置，
   // 不允许在这里回头读取 WorkflowController 或 TaskState。
-  const config = resolveRoleModelConfig();
+  const config = resolveRoleCodexConfig();
   const promptBundle = await buildRolePrompt(roleName, roleRuntime.projectConfig);
-  // 角色 Agent 初始化刻意不传 temperature，
-  // 以符合 role-layer 计划文档对统一模型入口的约束。
-  const llm = new ChatOpenAI({
-    model: config.model,
-    apiKey: config.apiKey,
-    configuration: {
-      baseURL: config.baseUrl,
-    },
-  });
 
   return {
-    llm,
+    // bootstrap 只负责装配“执行器 + prompt + 配置”，
+    // 真正执行放到 run 阶段，避免角色实例化时就触发模型调用。
+    executor: new CodexCliRoleAgentExecutor(),
     prompt: promptBundle.prompt,
     promptSources: promptBundle.promptSources,
     promptWarnings: promptBundle.promptWarnings,
@@ -79,9 +75,15 @@ export async function executeRoleAgent(input: {
     );
   }
 
-  // 默认执行模式必须真实调用模型，不能只初始化 Agent 而不执行。
-  const response = await input.bootstrap.llm.invoke(executionPrompt);
-  const rawContent = normalizeModelContent((response as { content?: unknown }).content);
+  // 默认执行模式必须真实进入统一角色执行器，
+  // 不能退化成直接调用通用聊天模型接口。
+  const rawContent = await input.bootstrap.executor.execute({
+    roleName: input.roleName,
+    prompt: executionPrompt,
+    context: input.context,
+    executionProfile: input.executionProfile,
+    config: input.bootstrap.config,
+  });
   const parsed = parseRoleResultPayload(rawContent);
 
   return {
@@ -89,8 +91,12 @@ export async function executeRoleAgent(input: {
     artifacts: parsed.artifacts,
     metadata: {
       ...parsed.metadata,
+      // 这些元信息用于后续确认一次角色输出到底走的是哪条执行链路，
+      // 防止“看起来是 agent，实际又退回普通模型调用”的回归。
       agentConfigured: true,
       executionMode: input.bootstrap.config.executionMode,
+      agentExecutor: input.bootstrap.executor.executorKind,
+      agentModel: input.bootstrap.config.model,
       promptSources: input.bootstrap.promptSources,
       promptWarnings: input.bootstrap.promptWarnings,
       executionProfile: input.executionProfile,
@@ -107,6 +113,8 @@ function buildRoleExecutionPrompt(
   input: string,
   visibleArtifacts: VisibleArtifact[],
 ): string {
+  // 这里把角色职责、执行上下文、工件可见范围统一压成一份执行协议，
+  // 确保不同角色虽然复用同一执行器，但仍然按各自边界工作。
   return [
     basePrompt,
     "",
@@ -174,6 +182,8 @@ async function loadVisibleArtifacts(
       continue;
     }
 
+    // Role 层只能读取当前阶段暴露出来的工件快照，
+    // 不持有 ArtifactManager，也不在这里做任何写入。
     visibleArtifacts.push({
       key,
       content,
@@ -226,8 +236,12 @@ function buildStubRoleResult(
     summary: `${roleName} 已通过 stub Agent 执行 ${context.phase} 阶段。`,
     artifacts: [artifactSections.join("\n")],
     metadata: {
+      // stub 只服务测试与离线校验，元信息里显式打标，
+      // 避免把它误认为正式生产链路。
       agentConfigured: true,
       executionMode: "stub",
+      agentExecutor: "stub",
+      agentModel: bootstrap.config.model,
       promptSources: bootstrap.promptSources,
       promptWarnings: bootstrap.promptWarnings,
       executionProfile,
@@ -290,33 +304,4 @@ function extractJsonPayload(content: string): string {
   }
 
   return content.trim();
-}
-
-function normalizeModelContent(content: unknown): string {
-  if (typeof content === "string") {
-    return content;
-  }
-
-  if (Array.isArray(content)) {
-    return content
-      .map((item) => {
-        if (typeof item === "string") {
-          return item;
-        }
-
-        if (
-          item &&
-          typeof item === "object" &&
-          "text" in item &&
-          typeof (item as { text?: unknown }).text === "string"
-        ) {
-          return (item as { text: string }).text;
-        }
-
-        return JSON.stringify(item);
-      })
-      .join("\n");
-  }
-
-  return content == null ? "" : String(content);
 }

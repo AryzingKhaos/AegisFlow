@@ -19,4 +19,5 @@
 | `0.1.0` | `default-workflow-intake-layer` | [0.1.0/default-workflow-intake-layer-prd.md](0.1.0/default-workflow-intake-layer-prd.md) |
 | `0.1.0` | `default-workflow-workflow-layer` | [0.1.0/default-workflow-workflow-layer-prd.md](0.1.0/default-workflow-workflow-layer-prd.md) |
 | `0.1.0` | `default-workflow-role-layer` | [0.1.0/default-workflow-role-layer-prd.md](0.1.0/default-workflow-role-layer-prd.md) |
+| `0.1.0` | `default-workflow-role-codex-agent` | [0.1.0/default-workflow-role-codex-agent-prd.md](0.1.0/default-workflow-role-codex-agent-prd.md) |
 | `0.1.0` | `default-workflow-role-prompt-bootstrap` | [0.1.0/default-workflow-role-prompt-bootstrap-prd.md](0.1.0/default-workflow-role-prompt-bootstrap-prd.md) |
