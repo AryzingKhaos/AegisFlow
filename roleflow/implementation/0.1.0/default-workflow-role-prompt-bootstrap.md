@@ -94,12 +94,12 @@ flowchart TD
 
 ## Todolist (todoList)
 
-- [ ] 确认 `default-workflow-role-prompt-bootstrap-prd.md` 中关于原型层、项目侧源目录、物化目录和配置路径的最终口径，并据此整理实现边界。
-- [ ] 校对 `.aegisflow/aegisproject.yaml` 中的 `roles.prototypeDir`、`roles.promptDir` 与 PRD 是否一致。
-- [ ] 收敛 `project.md` 中与本 PRD 相关的 `roles` 配置示例，去掉把 `critic` override 当成默认前提的过时表达。
-- [ ] 逐项校对 `roleflow/context/roles/*.md` 与 `.aegisflow/roles/*.md` 的物化一致性，修正当前已发现的 `critic.md` 漂移。
-- [ ] 确认 `.aegisflow/roles/` 至少保留当前项目侧默认角色提示词文件以及 `common.md`、`index.md`。
-- [ ] 保持 `src/default-workflow/role/prompts.ts` 中的原型层路径与 `critic -> frontend-critic.md` 映射不变，同时确认项目侧默认读取仍为 `critic.md` 同名文件。
-- [ ] 明确 `roles.overrides.*.extraInstructions` 在本期中的定位是“可选覆盖能力”，而不是默认 bootstrap 依赖。
-- [ ] 补充或更新测试，覆盖 `.aegisflow/aegisproject.yaml` 的 `roles` 配置、`critic` 默认同名装载、override 可选优先、以及项目侧物化目录与源目录的一致性。
-- [ ] 完成自检，确认本次计划只处理角色提示词装载与配置落位，不引入新的角色集合、角色能力或推理策略。
+- [x] 确认 `default-workflow-role-prompt-bootstrap-prd.md` 中关于原型层、项目侧源目录、物化目录和配置路径的最终口径，并据此整理实现边界。
+- [x] 校对 `.aegisflow/aegisproject.yaml` 中的 `roles.prototypeDir`、`roles.promptDir` 与 PRD 是否一致。
+- [x] 收敛 `project.md` 中与本 PRD 相关的 `roles` 配置示例，去掉把 `critic` override 当成默认前提的过时表达。
+- [x] 逐项校对 `roleflow/context/roles/*.md` 与 `.aegisflow/roles/*.md` 的物化一致性，修正当前已发现的 `critic.md` 漂移。
+- [x] 确认 `.aegisflow/roles/` 至少保留当前项目侧默认角色提示词文件以及 `common.md`、`index.md`。
+- [x] 保持 `src/default-workflow/role/prompts.ts` 中的原型层路径与 `critic -> frontend-critic.md` 映射不变，同时确认项目侧默认读取仍为 `critic.md` 同名文件。
+- [x] 明确 `roles.overrides.*.extraInstructions` 在本期中的定位是“可选覆盖能力”，而不是默认 bootstrap 依赖。
+- [x] 补充或更新测试，覆盖 `.aegisflow/aegisproject.yaml` 的 `roles` 配置、`critic` 默认同名装载、override 可选优先、以及项目侧物化目录与源目录的一致性。
+- [x] 完成自检，确认本次计划只处理角色提示词装载与配置落位，不引入新的角色集合、角色能力或推理策略。

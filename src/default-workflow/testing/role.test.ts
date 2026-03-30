@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -237,12 +237,38 @@ describe("role layer", () => {
       "utf8",
     );
 
+    expect(configContent).toContain('type: "default-workflow"');
+    expect(configContent).toContain('artifactDir: ".aegisflow/artifacts"');
+    expect(configContent).toContain('snapshotDir: ".aegisflow/state"');
+    expect(configContent).toContain('logDir: ".aegisflow/logs"');
+    expect(configContent).toContain('prototypeDir: "/Users/aaron/code/roleflow/roles"');
     expect(configContent).toContain('promptDir: ".aegisflow/roles"');
     expect(configContent).not.toContain("frontend-critic.md");
     expect(projectRoleIndex).toContain("[critic.md](critic.md)");
     expect(projectRoleIndex).not.toContain("[frontend-critic.md](frontend-critic.md)");
     expect(sourceRoleIndex).toContain("[critic.md](critic.md)");
     expect(sourceRoleIndex).not.toContain("[frontend-critic.md]");
+  });
+
+  it("keeps materialized project role prompts aligned with source role prompts", async () => {
+    const sourceDir = path.resolve(process.cwd(), "roleflow/context/roles");
+    const materializedDir = path.resolve(process.cwd(), ".aegisflow/roles");
+    const sourceFiles = (await readdir(sourceDir)).filter((file) => file.endsWith(".md"));
+    const materializedFiles = (await readdir(materializedDir)).filter((file) =>
+      file.endsWith(".md"),
+    );
+
+    expect(materializedFiles.sort()).toEqual(sourceFiles.sort());
+
+    for (const fileName of sourceFiles) {
+      const sourceContent = await readFile(path.join(sourceDir, fileName), "utf8");
+      const materializedContent = await readFile(
+        path.join(materializedDir, fileName),
+        "utf8",
+      );
+
+      expect(materializedContent).toBe(sourceContent);
+    }
   });
 
   it("executes role output through the agent pipeline instead of local placeholder text", async () => {

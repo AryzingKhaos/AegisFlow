@@ -521,11 +521,11 @@ project:
 
 paths:
   cwd: "/Users/aaron/code/projectpath"
-  artifactDir: ".aegis/artifacts"
-  snapshotDir: ".aegis/state"
-  logDir: ".aegis/logs"
+  artifactDir: ".aegisflow/artifacts"
+  snapshotDir: ".aegisflow/state"
+  logDir: ".aegisflow/logs"
   requirementDocs: "docs/requirements"  # 项目需求文档目录
-  knowledgeBase: ".aegis/knowledge"    # 项目知识库路径（加载方式以后再定）
+  knowledgeBase: ".aegisflow/knowledge"    # 项目知识库路径（加载方式以后再定）
  
 codeStyle:
   # eslintConfig: ".eslintrc.json"
@@ -535,7 +535,7 @@ codeStyle:
   codeReviewGuide: "docs/code_review.md"     # review注意事项
 
 workflow:
-  type: "default" # 预留：未来支持多 workflow
+  type: "default-workflow" # 预留：未来支持多 workflow
   phases:
     - name: "clarify"
       hostRole: "clarifier"
@@ -564,9 +564,9 @@ workflow:
 roles:
   prototypeDir: "/Users/aaron/code/roleflow/roles" # 角色原型目录
   promptDir: ".aegisflow/roles" # AegisFlow 项目级角色提示词目录
-  overrides:
-    critic:
-      extraInstructions: ".aegisflow/roles/critic.md"
+  # overrides:
+  #   critic:
+  #     extraInstructions: ".aegisflow/roles/custom-critic.md"
 
 artifacts:
   structure: "by-phase" # by-phase / flat

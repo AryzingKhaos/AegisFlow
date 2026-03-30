@@ -1,4 +1,4 @@
-# Frontend Critic（前端审查者）
+# Critic（审查者）
 
 > 角色原型：/Users/aaron/code/roleflow/roles/frontend-critic.md
 > 公共规范：@roleflow/context/roles/common.md
