@@ -21,6 +21,7 @@ export interface RoleAgentExecutionRequest {
 export interface RoleAgentExecutor {
   readonly executorKind: string;
   execute(input: RoleAgentExecutionRequest): Promise<string>;
+  shutdown?(): Promise<void>;
 }
 
 interface CodexCliExecutorDependencies {
@@ -31,6 +32,7 @@ interface CodexCliExecutorDependencies {
       cwd: string;
       input: string;
       env: Record<string, string | undefined>;
+      timeoutMs: number;
       onStdoutLine?: (line: string) => void;
     },
   ) => Promise<unknown>;
@@ -38,6 +40,7 @@ interface CodexCliExecutorDependencies {
 
 export class CodexCliRoleAgentExecutor implements RoleAgentExecutor {
   public readonly executorKind = "codex-cli";
+  private sessionId?: string;
 
   public constructor(
     private readonly dependencies: CodexCliExecutorDependencies = {},
@@ -48,6 +51,8 @@ export class CodexCliRoleAgentExecutor implements RoleAgentExecutor {
     // 这样可以避免把终端事件流当成最终结构化输出来源。
     const outputPath = buildRoleAgentOutputPath(input);
     let pendingVisibleOutput = Promise.resolve();
+    let nextSessionId = this.sessionId;
+    const executorConfig = input.context.projectConfig.roleExecutor;
 
     await fs.mkdir(path.dirname(outputPath), { recursive: true });
 
@@ -55,37 +60,20 @@ export class CodexCliRoleAgentExecutor implements RoleAgentExecutor {
       // 角色执行器统一通过 codex exec 发起请求，
       // 明确与通用聊天接口分离，避免默认角色再次退化成直接 llm.invoke(prompt)。
       await (this.dependencies.runCommand ?? runStreamingCodexCommand)(
-        "codex",
-        [
-          "exec",
-          "--json",
-          "--full-auto",
-          "--skip-git-repo-check",
-          "--sandbox",
-          // 只读角色禁止副作用，交给 Codex 时也同步收紧 sandbox；
-          // builder / tester 这类允许副作用的角色才给 workspace-write。
-          input.executionProfile.sideEffects === "allowed"
-            ? "workspace-write"
-            : "read-only",
-          "--cd",
-          input.context.cwd,
-          "--model",
-          input.config.model,
-          "--output-last-message",
-          outputPath,
-          "-",
-        ],
+        executorConfig.command,
+        buildCodexCommandArgs(input, outputPath, this.sessionId),
         {
-          cwd: input.context.cwd,
+          cwd: executorConfig.cwd,
           input: input.prompt,
-          env: {
-            ...process.env,
-            // Codex 侧统一复用角色层收敛后的配置结果，
-            // 避免执行器内部再自行推导模型鉴权入口。
-            OPENAI_API_KEY: input.config.apiKey,
-            OPENAI_BASE_URL: input.config.baseUrl,
-          },
+          env: buildExecutorEnv(input),
+          timeoutMs: executorConfig.timeoutMs,
           onStdoutLine: (line: string) => {
+            const discoveredSessionId = extractSessionIdFromCodexEventLine(line);
+
+            if (discoveredSessionId) {
+              nextSessionId = discoveredSessionId;
+            }
+
             const visibleMessages = extractVisibleMessagesFromCodexEventLine(line);
 
             for (const message of visibleMessages) {
@@ -100,6 +88,7 @@ export class CodexCliRoleAgentExecutor implements RoleAgentExecutor {
         },
       );
       await pendingVisibleOutput;
+      this.sessionId = nextSessionId;
 
       return await fs.readFile(outputPath, "utf8");
     } catch (error) {
@@ -108,6 +97,12 @@ export class CodexCliRoleAgentExecutor implements RoleAgentExecutor {
 
       throw new Error(`Role Codex agent execution failed: ${message}`);
     }
+  }
+
+  public async shutdown(): Promise<void> {
+    // 当前 session 通过 thread/session id 复用；
+    // 任务终态时清空本地引用即可结束 AegisFlow 侧生命周期，避免后续继续 resume。
+    this.sessionId = undefined;
   }
 }
 
@@ -118,6 +113,7 @@ export async function runStreamingCodexCommand(
     cwd: string;
     input: string;
     env: Record<string, string | undefined>;
+    timeoutMs: number;
     onStdoutLine?: (line: string) => void;
   },
 ): Promise<void> {
@@ -125,6 +121,7 @@ export async function runStreamingCodexCommand(
     cwd: options.cwd,
     input: options.input,
     env: options.env,
+    timeout: options.timeoutMs,
   });
   const stdoutStream = (
     subprocess as unknown as {
@@ -212,6 +209,59 @@ function normalizeProcessChunk(chunk: unknown): string {
   return String(chunk ?? "");
 }
 
+function buildCodexCommandArgs(
+  input: RoleAgentExecutionRequest,
+  outputPath: string,
+  sessionId?: string,
+): string[] {
+  const baseArgs = sessionId
+    ? [
+        "exec",
+        "resume",
+        "--json",
+        "--skip-git-repo-check",
+        "--output-last-message",
+        outputPath,
+        sessionId,
+        "-",
+      ]
+    : [
+        "exec",
+        "--json",
+        "--full-auto",
+        "--skip-git-repo-check",
+        "--sandbox",
+        input.executionProfile.sideEffects === "allowed"
+          ? "workspace-write"
+          : "read-only",
+        "--cd",
+        input.context.projectConfig.roleExecutor.cwd,
+        "--model",
+        input.config.model,
+        "--output-last-message",
+        outputPath,
+        "-",
+      ];
+
+  return baseArgs;
+}
+
+function buildExecutorEnv(
+  input: RoleAgentExecutionRequest,
+): Record<string, string | undefined> {
+  const passthrough =
+    input.context.projectConfig.roleExecutor.env.passthrough;
+  const baseEnv = passthrough ? { ...process.env } : {};
+
+  return {
+    ...baseEnv,
+    // Codex 侧统一复用角色层收敛后的配置结果，
+    // 避免执行器内部再自行推导模型鉴权入口。
+    OPENAI_API_KEY: input.config.apiKey,
+    OPENAI_BASE_URL: input.config.baseUrl,
+  };
+}
+
 function extractVisibleMessagesFromCodexEventLine(line: string): string[] {
   const trimmedLine = line.trim();
 
@@ -225,6 +275,30 @@ function extractVisibleMessagesFromCodexEventLine(line: string): string[] {
     return collectVisibleMessages(parsed).filter((message) => message.trim().length > 0);
   } catch {
     return shouldSuppressPlainStdoutLine(trimmedLine) ? [] : [trimmedLine];
+  }
+}
+
+function extractSessionIdFromCodexEventLine(line: string): string | undefined {
+  const trimmedLine = line.trim();
+
+  if (!trimmedLine) {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(trimmedLine) as Record<string, unknown>;
+
+    if (
+      parsed.type === "thread.started" &&
+      typeof parsed.thread_id === "string" &&
+      parsed.thread_id.trim().length > 0
+    ) {
+      return parsed.thread_id.trim();
+    }
+
+    return undefined;
+  } catch {
+    return undefined;
   }
 }
 

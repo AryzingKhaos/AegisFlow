@@ -10,6 +10,8 @@ export const DEFAULT_INTAKE_BASE_URL = "https://co.yes.vg/v1";
 // PRD 对外表述为“codex 5.4”，代码里使用可执行的模型标识。
 export const DEFAULT_ROLE_CODEX_MODEL = "codex-5.4";
 export const DEFAULT_ROLE_CODEX_BASE_URL = "https://api.openai.com/v1";
+export const DEFAULT_ROLE_EXECUTOR_COMMAND = "codex";
+export const DEFAULT_ROLE_EXECUTOR_TIMEOUT_MS = 300000;
 export const DEFAULT_WORKFLOW_ID = "default-workflow";
 export const DEFAULT_ARTIFACT_DIR_NAME = ".aegisflow/artifacts";
 export const DEFAULT_ROLE_PROMPT_DIR_NAME = ".aegisflow/roles";

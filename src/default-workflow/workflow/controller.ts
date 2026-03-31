@@ -261,6 +261,7 @@ export class DefaultWorkflowController implements WorkflowController {
       status: TaskStatus.FAILED,
     });
     await this.saveSnapshot("task_cancelled");
+    await this.disposeRoleSessions();
     return workflowEvents;
   }
 
@@ -299,6 +300,7 @@ export class DefaultWorkflowController implements WorkflowController {
       status: TaskStatus.COMPLETED,
     });
     await this.saveSnapshot("task_completed");
+    await this.disposeRoleSessions();
   }
 
   private async resumeInternal(
@@ -350,6 +352,7 @@ export class DefaultWorkflowController implements WorkflowController {
           status: TaskStatus.COMPLETED,
         });
         await this.saveSnapshot("task_completed_after_final_approval");
+        await this.disposeRoleSessions();
         return workflowEvents;
       }
 
@@ -684,7 +687,18 @@ export class DefaultWorkflowController implements WorkflowController {
       status: TaskStatus.FAILED,
     });
     await this.saveSnapshot("task_failed");
+    await this.disposeRoleSessions();
     return workflowEvents;
+  }
+
+  private async disposeRoleSessions(): Promise<void> {
+    try {
+      // 角色执行器可能维护长期 CLI session；
+      // 任务进入终态后要在 Runtime 边界统一回收，避免后续错误复用旧 session。
+      await this.dependencies.roleRegistry.disposeAll?.();
+    } catch {
+      // 这里以任务终态落盘为最高优先级，清理异常不再回滚任务状态。
+    }
   }
 
   private getCurrentPhaseConfigSafe(): WorkflowPhaseConfig | null {

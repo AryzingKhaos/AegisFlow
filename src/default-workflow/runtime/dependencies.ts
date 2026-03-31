@@ -79,6 +79,17 @@ export class DefaultRoleRegistry implements RoleRegistry {
     return [...this.roleDefinitions.keys()].sort();
   }
 
+  public async disposeAll(): Promise<void> {
+    const roles = [...this.roleInstances.values()];
+
+    await Promise.all(
+      roles.map(async (role) => {
+        await role.dispose?.();
+      }),
+    );
+    this.roleInstances.clear();
+  }
+
   private createRoleRuntime(): RoleRuntime {
     // RoleRuntime 只暴露角色初始化真正需要的共享依赖，
     // 防止角色在 create() 阶段越权触碰 Workflow 内部状态。
@@ -173,6 +184,14 @@ function createDefaultRoleDefinition(
             context,
             input,
           });
+        },
+        async dispose() {
+          if (!bootstrapPromise) {
+            return;
+          }
+
+          const bootstrap = await bootstrapPromise;
+          await bootstrap.executor.shutdown?.();
         },
       };
     },

@@ -245,6 +245,11 @@ describe("role layer", () => {
     expect(configContent).toContain('logDir: ".aegisflow/logs"');
     expect(configContent).toContain('prototypeDir: "/Users/aaron/code/roleflow/roles"');
     expect(configContent).toContain('promptDir: ".aegisflow/roles"');
+    expect(configContent).toContain('type: "codex-cli"');
+    expect(configContent).toContain('command: "codex"');
+    expect(configContent).toContain('cwd: "."');
+    expect(configContent).toContain("timeoutMs: 300000");
+    expect(configContent).toContain("passthrough: true");
     expect(configContent).not.toContain("frontend-critic.md");
     expect(projectRoleIndex).toContain("[critic.md](critic.md)");
     expect(projectRoleIndex).not.toContain("[frontend-critic.md](frontend-critic.md)");
@@ -609,6 +614,138 @@ describe("role layer", () => {
     expect(config.baseUrl).toBe("https://api.openai.com/v1");
     expect(config.sources.model).toBe("default");
     expect(config.sources.baseUrl).toBe("default");
+  });
+
+  it("creates project config with codex cli executor defaults and overrides", () => {
+    const defaultConfig = createProjectConfig({
+      projectDir: "/tmp/project",
+      artifactDir: "/tmp/project/.aegisflow/artifacts",
+      workflow: createWorkflowSelection("bugfix"),
+    });
+    const customConfig = createProjectConfig({
+      projectDir: "/tmp/project",
+      artifactDir: "/tmp/project/.aegisflow/artifacts",
+      workflow: createWorkflowSelection("bugfix"),
+      roleExecutor: {
+        command: "custom-codex",
+        cwd: ".aegisflow/runtime",
+        timeoutMs: 120000,
+        env: {
+          passthrough: false,
+        },
+      },
+    });
+
+    expect(defaultConfig.roleExecutor).toEqual({
+      type: "codex-cli",
+      command: "codex",
+      cwd: "/tmp/project",
+      timeoutMs: 300000,
+      env: {
+        passthrough: true,
+      },
+    });
+    expect(customConfig.roleExecutor).toEqual({
+      type: "codex-cli",
+      command: "custom-codex",
+      cwd: "/tmp/project/.aegisflow/runtime",
+      timeoutMs: 120000,
+      env: {
+        passthrough: false,
+      },
+    });
+  });
+
+  it("reuses the same codex cli session for repeated runs of the same role", async () => {
+    const root = await createTempProject();
+    const projectDir = path.join(root, "project");
+    await mkdir(projectDir, { recursive: true });
+
+    const observedArgs: string[][] = [];
+    const executor = new CodexCliRoleAgentExecutor({
+      async runCommand(_file, args, options) {
+        observedArgs.push(args);
+
+        if (observedArgs.length === 1) {
+          options.onStdoutLine?.('{"type":"thread.started","thread_id":"session-builder-1"}');
+        }
+
+        const outputPath = args[args.indexOf("--output-last-message") + 1];
+        await writeFile(
+          outputPath,
+          JSON.stringify({
+            summary: `result-${observedArgs.length}`,
+            artifacts: [],
+          }),
+          "utf8",
+        );
+      },
+    });
+
+    const context = {
+      taskId: "task_session_reuse_case",
+      phase: "build" as const,
+      cwd: projectDir,
+      projectConfig: createProjectConfig({
+        projectDir,
+        artifactDir: path.join(root, "artifacts"),
+        workflow: createWorkflowSelection("bugfix"),
+      }),
+      roleCapabilityProfile: createCapabilityProfile("builder"),
+      artifacts: {
+        async get() {
+          return undefined;
+        },
+        async list() {
+          return [];
+        },
+      },
+    };
+
+    const first = await executor.execute({
+      roleName: "builder",
+      prompt: "FIRST_PROMPT",
+      context,
+      executionProfile: createCapabilityProfile("builder"),
+      config: {
+        model: "codex-5.4",
+        baseUrl: "https://api.openai.com/v1",
+        apiKey: "dummy",
+        executionMode: "agent",
+        sources: {
+          model: "default",
+          baseUrl: "default",
+          apiKey: "OPENAI_API_KEY",
+          executionMode: "default",
+        },
+      },
+    });
+
+    const second = await executor.execute({
+      roleName: "builder",
+      prompt: "SECOND_PROMPT",
+      context,
+      executionProfile: createCapabilityProfile("builder"),
+      config: {
+        model: "codex-5.4",
+        baseUrl: "https://api.openai.com/v1",
+        apiKey: "dummy",
+        executionMode: "agent",
+        sources: {
+          model: "default",
+          baseUrl: "default",
+          apiKey: "OPENAI_API_KEY",
+          executionMode: "default",
+        },
+      },
+    });
+
+    expect(first).toContain("result-1");
+    expect(second).toContain("result-2");
+    expect(observedArgs[0][0]).toBe("exec");
+    expect(observedArgs[0]).not.toContain("resume");
+    expect(observedArgs[1].slice(0, 2)).toEqual(["exec", "resume"]);
+    expect(observedArgs[1]).toContain("session-builder-1");
   });
 
   it("passes read-only ExecutionContext into roles and persists string artifacts", async () => {

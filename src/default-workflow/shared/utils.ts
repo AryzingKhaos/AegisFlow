@@ -1,6 +1,8 @@
 import path from "node:path";
 import {
   DEFAULT_ARTIFACT_DIR_NAME,
+  DEFAULT_ROLE_EXECUTOR_COMMAND,
+  DEFAULT_ROLE_EXECUTOR_TIMEOUT_MS,
   DEFAULT_WORKFLOW_ID,
   DEFAULT_WORKFLOW_PHASES,
   DEFAULT_WORKFLOW_PROFILE_ID,
@@ -11,6 +13,7 @@ import {
 import type {
   ProjectConfig,
   RoleName,
+  RoleExecutorConfig,
   TaskState,
   WorkflowPhaseConfig,
   WorkflowSelection,
@@ -105,6 +108,7 @@ export function createProjectConfig(input: {
   workflowProfileLabel?: string;
   targetProjectRolePromptPath?: string;
   rolePromptOverrides?: Partial<Record<RoleName, string>>;
+  roleExecutor?: Partial<RoleExecutorConfig>;
 }): ProjectConfig {
   const resolvedProjectDir = path.resolve(input.projectDir);
 
@@ -116,6 +120,10 @@ export function createProjectConfig(input: {
       input.targetProjectRolePromptPath ?? DEFAULT_ROLE_PROMPT_DIR_NAME,
     ),
     rolePromptOverrides: { ...(input.rolePromptOverrides ?? {}) },
+    roleExecutor: createRoleExecutorConfig(
+      resolvedProjectDir,
+      input.roleExecutor,
+    ),
     workflow: input.workflow,
     workflowProfileId: input.workflowProfileId ?? DEFAULT_WORKFLOW_PROFILE_ID,
     workflowProfileLabel:
@@ -127,6 +135,21 @@ export function createProjectConfig(input: {
     ),
     resumePolicy: "rebuild_runtime",
     approvalMode: "human_in_the_loop",
+  };
+}
+
+export function createRoleExecutorConfig(
+  projectDir: string,
+  input?: Partial<RoleExecutorConfig>,
+): RoleExecutorConfig {
+  return {
+    type: "codex-cli",
+    command: input?.command ?? DEFAULT_ROLE_EXECUTOR_COMMAND,
+    cwd: path.resolve(projectDir, input?.cwd ?? projectDir),
+    timeoutMs: input?.timeoutMs ?? DEFAULT_ROLE_EXECUTOR_TIMEOUT_MS,
+    env: {
+      passthrough: input?.env?.passthrough ?? true,
+    },
   };
 }
 

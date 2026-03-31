@@ -60,6 +60,7 @@ export async function buildRuntimeForNewTask(
   // Runtime 装配顺序固定为：
   // 配置 -> 基础设施 -> 初始状态 -> WorkflowController。
   // 这样恢复和新建任务都能复用同一套初始化约束。
+  const roleExecutor = await resolveProjectRoleExecutorConfig(input.projectDir);
   const projectConfig = createProjectConfig({
     projectDir: input.projectDir,
     artifactDir: input.artifactDir,
@@ -67,6 +68,7 @@ export async function buildRuntimeForNewTask(
     workflowPhases: input.workflowPhases,
     workflowProfileId: input.workflowProfileId,
     workflowProfileLabel: input.workflowProfileLabel,
+    roleExecutor,
   });
   const eventEmitter = new EventEmitter();
   const eventLogger = new JsonlEventLogger(
@@ -139,7 +141,13 @@ export async function buildRuntimeForResume(
 
   // 恢复必须基于持久化工件重建新的 Runtime，不能复用旧进程内存。
   const runtimeId = createRuntimeId();
-  const projectConfig = createProjectConfig(input.projectConfig);
+  const roleExecutor = await resolveProjectRoleExecutorConfig(
+    input.projectConfig.projectDir,
+  );
+  const projectConfig = createProjectConfig({
+    ...input.projectConfig,
+    roleExecutor,
+  });
   const eventEmitter = new EventEmitter();
   const eventLogger = new JsonlEventLogger(
     path.join(projectConfig.artifactDir, "workflow-events.jsonl"),
@@ -176,6 +184,7 @@ export async function buildRuntimeForResume(
   const persistedContext: PersistedTaskContext = {
     ...input.persistedContext,
     lastRuntimeId: runtimeId,
+    projectConfig,
   };
 
   await artifactManager.saveTaskContext(persistedContext);
@@ -262,4 +271,189 @@ function createArtifactLookupProjectConfig(artifactDir: string): ProjectConfig {
     artifactDir,
     workflow: createWorkflowSelection("feature_change"),
   });
+}
+
+async function resolveProjectRoleExecutorConfig(
+  projectDir: string,
+): Promise<Partial<ProjectConfig["roleExecutor"]> | undefined> {
+  const yamlOverride = await loadRoleExecutorConfigFromYaml(projectDir);
+
+  if (!yamlOverride) {
+    return undefined;
+  }
+
+  return yamlOverride;
+}
+
+async function loadRoleExecutorConfigFromYaml(
+  projectDir: string,
+): Promise<Partial<ProjectConfig["roleExecutor"]> | undefined> {
+  const configPath = path.join(
+    path.resolve(projectDir),
+    ".aegisflow",
+    "aegisproject.yaml",
+  );
+
+  try {
+    const content = await fs.readFile(configPath, "utf8");
+    return parseRoleExecutorConfig(content);
+  } catch {
+    return undefined;
+  }
+}
+
+function parseRoleExecutorConfig(
+  content: string,
+): Partial<ProjectConfig["roleExecutor"]> | undefined {
+  const result: Partial<ProjectConfig["roleExecutor"]> = {};
+  let inRolesBlock = false;
+  let inExecutorBlock = false;
+  let inEnvBlock = false;
+
+  for (const rawLine of content.split(/\r?\n/u)) {
+    const trimmedLine = rawLine.trim();
+
+    if (!trimmedLine || trimmedLine.startsWith("#")) {
+      continue;
+    }
+
+    const indent = getYamlIndent(rawLine);
+
+    if (indent === 0) {
+      inRolesBlock = trimmedLine === "roles:";
+      inExecutorBlock = false;
+      inEnvBlock = false;
+      continue;
+    }
+
+    if (!inRolesBlock) {
+      continue;
+    }
+
+    if (indent === 2) {
+      inEnvBlock = false;
+      inExecutorBlock = trimmedLine === "executor:";
+      continue;
+    }
+
+    if (!inExecutorBlock) {
+      continue;
+    }
+
+    if (indent === 4) {
+      inEnvBlock = trimmedLine === "env:";
+
+      if (inEnvBlock) {
+        continue;
+      }
+
+      const keyValue = splitYamlKeyValue(trimmedLine);
+
+      if (!keyValue) {
+        continue;
+      }
+
+      const value = parseYamlScalar(keyValue.value);
+
+      switch (keyValue.key) {
+        case "type":
+          if (value === "codex-cli") {
+            result.type = "codex-cli";
+          }
+          break;
+        case "command":
+          if (typeof value === "string") {
+            result.command = value;
+          }
+          break;
+        case "cwd":
+          if (typeof value === "string") {
+            result.cwd = value;
+          }
+          break;
+        case "timeoutMs":
+          if (typeof value === "number") {
+            result.timeoutMs = value;
+          }
+          break;
+        default:
+          break;
+      }
+
+      continue;
+    }
+
+    if (inEnvBlock && indent === 6) {
+      const keyValue = splitYamlKeyValue(trimmedLine);
+
+      if (!keyValue) {
+        continue;
+      }
+
+      const value = parseYamlScalar(keyValue.value);
+
+      if (keyValue.key === "passthrough" && typeof value === "boolean") {
+        result.env = {
+          ...(result.env ?? {}),
+          passthrough: value,
+        };
+      }
+    }
+  }
+
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
+function getYamlIndent(line: string): number {
+  let indent = 0;
+
+  while (indent < line.length && line[indent] === " ") {
+    indent += 1;
+  }
+
+  return indent;
+}
+
+function splitYamlKeyValue(
+  line: string,
+): { key: string; value: string } | null {
+  const separatorIndex = line.indexOf(":");
+
+  if (separatorIndex <= 0) {
+    return null;
+  }
+
+  return {
+    key: line.slice(0, separatorIndex).trim(),
+    value: line.slice(separatorIndex + 1).trim(),
+  };
+}
+
+function parseYamlScalar(value: string): string | number | boolean | undefined {
+  const normalized = value.replace(/\s+#.*$/u, "").trim();
+
+  if (!normalized) {
+    return undefined;
+  }
+
+  if (
+    (normalized.startsWith('"') && normalized.endsWith('"')) ||
+    (normalized.startsWith("'") && normalized.endsWith("'"))
+  ) {
+    return normalized.slice(1, -1);
+  }
+
+  if (normalized === "true") {
+    return true;
+  }
+
+  if (normalized === "false") {
+    return false;
+  }
+
+  if (/^-?\d+$/u.test(normalized)) {
+    return Number(normalized);
+  }
+
+  return normalized;
 }

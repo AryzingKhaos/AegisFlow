@@ -73,12 +73,23 @@ export interface ProjectConfig {
   artifactDir: string;
   targetProjectRolePromptPath: string;
   rolePromptOverrides: Partial<Record<RoleName, string>>;
+  roleExecutor: RoleExecutorConfig;
   workflow: WorkflowSelection;
   workflowProfileId: string;
   workflowProfileLabel: string;
   workflowPhases: WorkflowPhaseConfig[];
   resumePolicy: "rebuild_runtime";
   approvalMode: "human_in_the_loop";
+}
+
+export interface RoleExecutorConfig {
+  type: "codex-cli";
+  command: string;
+  cwd: string;
+  timeoutMs: number;
+  env: {
+    passthrough: boolean;
+  };
 }
 
 export type IntakeEventType =
@@ -198,6 +209,7 @@ export interface Role {
   placeholder: boolean;
   capabilityProfile: RoleCapabilityProfile;
   run(input: string, context: ExecutionContext): Promise<RoleResult>;
+  dispose?(): Promise<void>;
 }
 
 export interface RoleDefinition {
@@ -210,6 +222,7 @@ export interface RoleRegistry {
   register(roleDef: RoleDefinition): void;
   get(name: RoleName): Role;
   list(): string[];
+  disposeAll?(): Promise<void>;
 }
 
 export interface Runtime {

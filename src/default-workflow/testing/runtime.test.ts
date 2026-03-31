@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -141,6 +141,176 @@ describe("workflow runtime", () => {
         .filter((event) => event.type === "phase_start")
         .map((event) => event.metadata?.phase),
     ).toEqual(["build", "review"]);
+  });
+
+  it("loads roles.executor config from aegisproject yaml when building runtime", async () => {
+    const root = await createTempProject();
+    const projectDir = path.join(root, "project");
+    const artifactDir = path.join(projectDir, ".aegisflow", "artifacts");
+    await mkdir(path.join(projectDir, ".aegisflow"), { recursive: true });
+    await writeFile(
+      path.join(projectDir, ".aegisflow", "aegisproject.yaml"),
+      [
+        "roles:",
+        '  prototypeDir: "/tmp/roles"',
+        "  executor:",
+        '    type: "codex-cli"',
+        '    command: "custom-codex"',
+        '    cwd: "workspace/runtime"',
+        "    timeoutMs: 123456",
+        "    env:",
+        "      passthrough: false",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const runtimeResult = await buildRuntimeForNewTask({
+      projectDir,
+      artifactDir,
+      workflow: createWorkflowSelection("bugfix"),
+      workflowPhases: createDefaultWorkflowPhases(),
+      description: "读取角色执行器配置",
+    });
+
+    expect(runtimeResult.runtime.projectConfig.roleExecutor).toEqual({
+      type: "codex-cli",
+      command: "custom-codex",
+      cwd: path.join(projectDir, "workspace/runtime"),
+      timeoutMs: 123456,
+      env: {
+        passthrough: false,
+      },
+    });
+  });
+
+  it("reloads roles.executor config from aegisproject yaml when resuming runtime", async () => {
+    const root = await createTempProject();
+    const projectDir = path.join(root, "project");
+    const artifactDir = path.join(projectDir, ".aegisflow", "artifacts");
+    await mkdir(path.join(projectDir, ".aegisflow"), { recursive: true });
+
+    const configPath = path.join(projectDir, ".aegisflow", "aegisproject.yaml");
+    await writeFile(
+      configPath,
+      [
+        "roles:",
+        "  executor:",
+        '    type: "codex-cli"',
+        '    command: "codex-first"',
+        '    cwd: "."',
+        "    timeoutMs: 1000",
+        "    env:",
+        "      passthrough: true",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const newRuntimeResult = await buildRuntimeForNewTask({
+      projectDir,
+      artifactDir,
+      workflow: createWorkflowSelection("bugfix"),
+      workflowPhases: createDefaultWorkflowPhases(),
+      description: "恢复时重新读取角色执行器配置",
+    });
+
+    await writeFile(
+      configPath,
+      [
+        "roles:",
+        "  executor:",
+        '    type: "codex-cli"',
+        '    command: "codex-second"',
+        '    cwd: "runtime/override"',
+        "    timeoutMs: 2000",
+        "    env:",
+        "      passthrough: false",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const resumedRuntimeResult = await buildRuntimeForResume({
+      projectConfig: newRuntimeResult.persistedContext.projectConfig,
+      persistedContext: newRuntimeResult.persistedContext,
+    });
+
+    expect(resumedRuntimeResult.runtime.projectConfig.roleExecutor).toEqual({
+      type: "codex-cli",
+      command: "codex-second",
+      cwd: path.join(projectDir, "runtime/override"),
+      timeoutMs: 2000,
+      env: {
+        passthrough: false,
+      },
+    });
+  });
+
+  it("falls back to current defaults when roles.executor is removed before resume", async () => {
+    const root = await createTempProject();
+    const projectDir = path.join(root, "project");
+    const artifactDir = path.join(projectDir, ".aegisflow", "artifacts");
+    await mkdir(path.join(projectDir, ".aegisflow"), { recursive: true });
+
+    const configPath = path.join(projectDir, ".aegisflow", "aegisproject.yaml");
+    await writeFile(
+      configPath,
+      [
+        "roles:",
+        "  executor:",
+        '    type: "codex-cli"',
+        '    command: "codex-custom"',
+        '    cwd: "runtime/custom"',
+        "    timeoutMs: 2000",
+        "    env:",
+        "      passthrough: false",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const newRuntimeResult = await buildRuntimeForNewTask({
+      projectDir,
+      artifactDir,
+      workflow: createWorkflowSelection("bugfix"),
+      workflowPhases: createDefaultWorkflowPhases(),
+      description: "恢复时删除角色执行器配置",
+    });
+
+    await writeFile(
+      configPath,
+      [
+        "roles:",
+        '  prototypeDir: "/tmp/roles"',
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const resumedRuntimeResult = await buildRuntimeForResume({
+      projectConfig: newRuntimeResult.persistedContext.projectConfig,
+      persistedContext: newRuntimeResult.persistedContext,
+    });
+
+    expect(resumedRuntimeResult.runtime.projectConfig.roleExecutor).toEqual({
+      type: "codex-cli",
+      command: "codex",
+      cwd: projectDir,
+      timeoutMs: 300000,
+      env: {
+        passthrough: true,
+      },
+    });
+    expect(resumedRuntimeResult.persistedContext.projectConfig.roleExecutor).toEqual({
+      type: "codex-cli",
+      command: "codex",
+      cwd: projectDir,
+      timeoutMs: 300000,
+      env: {
+        passthrough: true,
+      },
+    });
   });
 
   it("does not pass approval control text into the next phase role input", async () => {
@@ -410,23 +580,24 @@ describe("workflow runtime", () => {
     });
 
     const logger = new MemoryEventLogger();
+    const roleRegistry = new TrackableRoleRegistry({
+      clarifier: {
+        name: "clarifier",
+        description: "clarifier",
+        placeholder: false,
+        capabilityProfile: createCapabilityProfile("clarifier"),
+        async run(): Promise<RoleResult> {
+          throw new Error("clarify exploded");
+        },
+      },
+    });
     const controller = new DefaultWorkflowController({
       taskState,
       projectConfig,
       eventEmitter: new EventEmitter(),
       eventLogger: logger,
       artifactManager,
-      roleRegistry: new TestRoleRegistry({
-        clarifier: {
-          name: "clarifier",
-          description: "clarifier",
-          placeholder: false,
-          capabilityProfile: createCapabilityProfile("clarifier"),
-          async run(): Promise<RoleResult> {
-            throw new Error("clarify exploded");
-          },
-        },
-      }),
+      roleRegistry,
     });
 
     const events = await controller.run(taskState.taskId, "失败用例");
@@ -435,6 +606,7 @@ describe("workflow runtime", () => {
     expect(taskState.phaseStatus).toBe("pending");
     expect(events.at(-2)?.type).toBe("error");
     expect(events.at(-1)?.type).toBe("task_end");
+    expect(roleRegistry.disposeAllCalls).toBe(1);
     expect(logger.events.some((event) => event.type === "error")).toBe(true);
 
     const snapshotPath = path.join(
@@ -482,18 +654,19 @@ describe("workflow runtime", () => {
       projectConfig,
     });
 
+    const roleRegistry = new TrackableRoleRegistry({
+      planner: createRole("planner", async () => ({
+        summary: "planner done",
+        artifacts: [],
+      })),
+    });
     const controller = new DefaultWorkflowController({
       taskState,
       projectConfig,
       eventEmitter: new EventEmitter(),
       eventLogger: new MemoryEventLogger(),
       artifactManager,
-      roleRegistry: new TestRoleRegistry({
-        planner: createRole("planner", async () => ({
-          summary: "planner done",
-          artifacts: [],
-        })),
-      }),
+      roleRegistry,
     });
 
     await controller.run(taskState.taskId, "最终审批用例");
@@ -505,12 +678,70 @@ describe("workflow runtime", () => {
       roleName: "planner",
       currentStep: "waiting_final_approval_after_plan",
     });
+    expect(roleRegistry.disposeAllCalls).toBe(0);
 
     await controller.resume(taskState.taskId, "批准完成");
 
     expect(taskState.status).toBe(TaskStatus.COMPLETED);
     expect(taskState.phaseStatus).toBe("done");
     expect(taskState.resumeFrom).toBeUndefined();
+    expect(roleRegistry.disposeAllCalls).toBe(1);
+  });
+
+  it("disposes role sessions after task completes normally", async () => {
+    const root = await createTempProject();
+    const projectDir = path.join(root, "project");
+    const artifactDir = path.join(root, "artifacts");
+    await mkdir(projectDir, { recursive: true });
+
+    const workflowPhases: WorkflowPhaseConfig[] = [
+      {
+        name: "build",
+        hostRole: "builder",
+        needApproval: false,
+      },
+    ];
+    const projectConfig = createProjectConfig({
+      projectDir,
+      artifactDir,
+      workflow: createWorkflowSelection("feature_change"),
+      workflowPhases,
+    });
+    const artifactManager = new FileArtifactManager(projectConfig);
+    const taskState = createInitialTaskState(
+      "task_dispose_on_complete",
+      "dispose_on_complete",
+      workflowPhases,
+    );
+    await artifactManager.initializeTask(taskState.taskId);
+    await artifactManager.saveTaskContext({
+      taskId: taskState.taskId,
+      title: taskState.title,
+      description: "完成后清理会话",
+      createdAt: Date.now(),
+      lastRuntimeId: "runtime_dispose_on_complete",
+      projectConfig,
+    });
+
+    const roleRegistry = new TrackableRoleRegistry({
+      builder: createRole("builder", async () => ({
+        summary: "builder done",
+        artifacts: [],
+      })),
+    });
+    const controller = new DefaultWorkflowController({
+      taskState,
+      projectConfig,
+      eventEmitter: new EventEmitter(),
+      eventLogger: new MemoryEventLogger(),
+      artifactManager,
+      roleRegistry,
+    });
+
+    await controller.run(taskState.taskId, "完成后清理会话");
+
+    expect(taskState.status).toBe(TaskStatus.COMPLETED);
+    expect(roleRegistry.disposeAllCalls).toBe(1);
   });
 
   it("settles phaseStatus when cancelling a running task", async () => {
@@ -551,18 +782,19 @@ describe("workflow runtime", () => {
       projectConfig,
     });
 
+    const roleRegistry = new TrackableRoleRegistry({
+      builder: createRole("builder", async () => ({
+        summary: "builder done",
+        artifacts: [],
+      })),
+    });
     const controller = new DefaultWorkflowController({
       taskState,
       projectConfig,
       eventEmitter: new EventEmitter(),
       eventLogger: new MemoryEventLogger(),
       artifactManager,
-      roleRegistry: new TestRoleRegistry({
-        builder: createRole("builder", async () => ({
-          summary: "builder done",
-          artifacts: [],
-        })),
-      }),
+      roleRegistry,
     });
 
     await controller.handleIntakeEvent({
@@ -574,6 +806,7 @@ describe("workflow runtime", () => {
 
     expect(taskState.status).toBe(TaskStatus.FAILED);
     expect(taskState.phaseStatus).toBe("pending");
+    expect(roleRegistry.disposeAllCalls).toBe(1);
   });
 
   it("preserves resume point when interrupted during approval wait", async () => {
@@ -654,6 +887,14 @@ class TestRoleRegistry implements RoleRegistry {
 
   public list(): string[] {
     return [...this.roles.keys()];
+  }
+}
+
+class TrackableRoleRegistry extends TestRoleRegistry {
+  public disposeAllCalls = 0;
+
+  public async disposeAll(): Promise<void> {
+    this.disposeAllCalls += 1;
   }
 }
 
