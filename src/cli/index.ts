@@ -2,20 +2,32 @@ import readline from "node:readline";
 import { IntakeAgent } from "../default-workflow";
 
 async function main(): Promise<void> {
-  const agent = new IntakeAgent(process.cwd());
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
   });
 
   let isClosed = false;
+  let isBusy = false;
   let pendingWork = Promise.resolve();
 
   const printLines = (lines: string[]): void => {
+    if (lines.length === 0) {
+      return;
+    }
+
     for (const line of lines) {
       console.log(line);
     }
+
+    if (!isClosed && !isBusy) {
+      rl.prompt();
+    }
   };
+
+  const agent = new IntakeAgent(process.cwd(), {
+    onWorkflowOutput: printLines,
+  });
 
   const prompt = (): void => {
     if (!isClosed) {
@@ -29,12 +41,16 @@ async function main(): Promise<void> {
 
   const enqueue = (work: () => Promise<void>): void => {
     pendingWork = pendingWork
-      .then(work)
+      .then(async () => {
+        isBusy = true;
+        await work();
+      })
       .catch((error) => {
         const message = error instanceof Error ? error.message : String(error);
         console.error(`CLI 处理失败：${message}`);
       })
       .finally(() => {
+        isBusy = false;
         prompt();
       });
   };

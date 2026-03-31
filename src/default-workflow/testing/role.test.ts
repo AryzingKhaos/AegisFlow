@@ -245,11 +245,11 @@ describe("role layer", () => {
     expect(configContent).toContain('logDir: ".aegisflow/logs"');
     expect(configContent).toContain('prototypeDir: "/Users/aaron/code/roleflow/roles"');
     expect(configContent).toContain('promptDir: ".aegisflow/roles"');
-    expect(configContent).not.toContain("critic.md");
+    expect(configContent).not.toContain("frontend-critic.md");
     expect(projectRoleIndex).toContain("[critic.md](critic.md)");
-    expect(projectRoleIndex).not.toContain("[critic.md](critic.md)");
+    expect(projectRoleIndex).not.toContain("[frontend-critic.md](frontend-critic.md)");
     expect(sourceRoleIndex).toContain("[critic.md](critic.md)");
-    expect(sourceRoleIndex).not.toContain("[critic.md]");
+    expect(sourceRoleIndex).not.toContain("[frontend-critic.md]");
   });
 
   it("keeps materialized project role prompts aligned with source role prompts", async () => {

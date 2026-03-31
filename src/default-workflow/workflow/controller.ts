@@ -8,6 +8,7 @@ import type {
   RoleName,
   RoleRegistry,
   RoleResult,
+  RoleVisibleOutput,
   TaskState,
   WorkflowController,
   WorkflowEvent,
@@ -105,19 +106,47 @@ export class DefaultWorkflowController implements WorkflowController {
     }
   }
 
-  public async runRole(roleName: RoleName, input: string): Promise<RoleResult> {
+  public async runRole(
+    roleName: RoleName,
+    input: string,
+    options?: {
+      workflowEvents?: WorkflowEvent[];
+      phase?: Phase;
+    },
+  ): Promise<RoleResult> {
     const role = this.dependencies.roleRegistry.get(roleName);
+    const phase = options?.phase ?? this.dependencies.taskState.currentPhase;
     // Workflow 只把最小执行上下文传给角色，
     // 不再把 TaskState、latestInput 或完整 ArtifactManager 暴露到 Role 层。
     const context = {
       taskId: this.dependencies.taskState.taskId,
-      phase: this.dependencies.taskState.currentPhase,
+      phase,
       cwd: this.dependencies.projectConfig.projectDir,
       artifacts: this.dependencies.artifactManager.createArtifactReader(
         this.dependencies.taskState.taskId,
       ),
       projectConfig: this.dependencies.projectConfig,
       roleCapabilityProfile: role.capabilityProfile,
+      emitVisibleOutput: options?.workflowEvents
+        ? async (output: RoleVisibleOutput) => {
+            const visibleMessage = output.message.trim();
+
+            if (!visibleMessage) {
+              return;
+            }
+
+            await this.pushEvent(
+              options.workflowEvents ?? [],
+              "role_output",
+              visibleMessage,
+              {
+                phase,
+                roleName,
+                outputKind: output.kind ?? "progress",
+              },
+            );
+          }
+        : undefined,
     };
 
     return role.run(input, context);
@@ -406,7 +435,10 @@ export class DefaultWorkflowController implements WorkflowController {
       },
     );
 
-    const roleResult = await this.runRole(phaseConfig.hostRole, input ?? "");
+    const roleResult = await this.runRole(phaseConfig.hostRole, input ?? "", {
+      workflowEvents,
+      phase: phaseConfig.name,
+    });
 
     await this.pushEvent(
       workflowEvents,

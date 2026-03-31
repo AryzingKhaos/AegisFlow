@@ -99,13 +99,13 @@ flowchart TD
 
 ## Todolist (todoList)
 
-- [ ] 盘点 `src/cli/index.ts`、`intake/agent.ts`、`workflow/controller.ts`、`role/model.ts` 的当前输出链路，锁定阻塞流式展示的关键边界。
-- [ ] 设计并收敛角色增量可见输出的事件模型，明确它与现有 `WorkflowEvent` 骨架事件的关系。
-- [ ] 在 `Role -> Workflow` 之间补出用户可见内容的增量转发机制，避免角色输出只能在最终 `RoleResult` 返回后出现。
-- [ ] 调整 `WorkflowController` 的事件发送逻辑，使骨架事件与角色内容都能统一、有序地广播给 `Intake`。
-- [ ] 改造 `IntakeAgent`，把当前基于 `workflowOutputBuffer` 的批量收集模式调整为实时接收和转发模式。
-- [ ] 调整 `src/cli/index.ts` 的输出循环，使 CLI 可以在任务执行过程中持续打印新增内容，而不是等待整轮调用结束。
-- [ ] 新增基础文本格式化模块或统一格式化函数，处理换行、段落、列表、代码块与 `\n` 转实际换行。
-- [ ] 补充失败、中断、等待审批场景下的输出策略，确保错误与状态信息也按统一规则排版且保持顺序。
-- [ ] 更新或新增测试，覆盖流式输出、角色内容透传、`\n` 正确显示、骨架事件保留、以及失败/审批/中断场景的可读性。
-- [ ] 完成自检，确认本次实现不引入新的 workflow / role，也不扩展到 GUI/TUI 范围。
+- [x] 盘点 `src/cli/index.ts`、`intake/agent.ts`、`workflow/controller.ts`、`role/model.ts` 的当前输出链路，锁定阻塞流式展示的关键边界。
+- [x] 设计并收敛角色增量可见输出的事件模型，明确它与现有 `WorkflowEvent` 骨架事件的关系。
+- [x] 在 `Role -> Workflow` 之间补出用户可见内容的增量转发机制，避免角色输出只能在最终 `RoleResult` 返回后出现。
+- [x] 调整 `WorkflowController` 的事件发送逻辑，使骨架事件与角色内容都能统一、有序地广播给 `Intake`。
+- [x] 改造 `IntakeAgent`，把当前基于 `workflowOutputBuffer` 的批量收集模式调整为实时接收和转发模式。
+- [x] 调整 `src/cli/index.ts` 的输出循环，使 CLI 可以在任务执行过程中持续打印新增内容，而不是等待整轮调用结束。
+- [x] 新增基础文本格式化模块或统一格式化函数，处理换行、段落、列表、代码块与 `\n` 转实际换行。
+- [x] 补充失败、中断、等待审批场景下的输出策略，确保错误与状态信息也按统一规则排版且保持顺序。
+- [x] 更新或新增测试，覆盖流式输出、角色内容透传、`\n` 正确显示、骨架事件保留、以及失败/审批/中断场景的可读性。
+- [x] 完成自检，确认本次实现不引入新的 workflow / role，也不扩展到 GUI/TUI 范围。

@@ -17,7 +17,6 @@ import {
   createDefaultWorkflowPhases,
   createWorkflowSelection,
   formatWorkflowPhases,
-  formatTaskStateSummary,
   isFalsyAnswer,
   isTruthyAnswer,
   resolveArtifactDir,
@@ -37,6 +36,7 @@ import {
   normalizeUserIntent,
 } from "./intent";
 import { initializeIntakeModel } from "./model";
+import { formatWorkflowEventForCli } from "./output";
 
 type PendingStep =
   | "confirm_workflow"
@@ -59,6 +59,10 @@ interface ResumeIndexSnapshot {
   updatedAt: number;
 }
 
+interface IntakeAgentOptions {
+  onWorkflowOutput?: (lines: string[]) => void;
+}
+
 export class IntakeAgent {
   private runtime?: Runtime;
   private persistedContext?: PersistedTaskContext;
@@ -67,7 +71,10 @@ export class IntakeAgent {
   private workflowOutputBuffer: string[] = [];
   private readonly modelBootstrap = initializeIntakeModel();
 
-  public constructor(private readonly cwd: string = process.cwd()) {}
+  public constructor(
+    private readonly cwd: string = process.cwd(),
+    private readonly options: IntakeAgentOptions = {},
+  ) {}
 
   public getBootstrapLines(): string[] {
     return [
@@ -402,18 +409,19 @@ export class IntakeAgent {
     // 每次 Runtime 重建后都重新绑定事件监听，
     // 避免中断恢复时复用旧的内存监听器。
     runtime.eventEmitter.on("workflow_event", (event: WorkflowEvent) => {
-      this.workflowOutputBuffer.push(this.formatWorkflowEvent(event));
-      this.workflowOutputBuffer.push(
-        `TaskState 摘要：${formatTaskStateSummary(event.taskState)}`,
-      );
+      const lines = this.formatWorkflowEvent(event);
+
+      if (this.options.onWorkflowOutput) {
+        this.options.onWorkflowOutput(lines);
+        return;
+      }
+
+      this.workflowOutputBuffer.push(...lines);
     });
   }
 
-  private formatWorkflowEvent(event: WorkflowEvent): string {
-    const metadataText = event.metadata
-      ? ` | metadata=${JSON.stringify(event.metadata)}`
-      : "";
-    return `[WorkflowEvent:${event.type}] taskId=${event.taskId} timestamp=${event.timestamp} message=${event.message}${metadataText}`;
+  private formatWorkflowEvent(event: WorkflowEvent): string[] {
+    return formatWorkflowEventForCli(event);
   }
 
   private async loadCurrentPersistedContext(): Promise<PersistedTaskContext | null> {

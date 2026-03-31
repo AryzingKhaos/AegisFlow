@@ -217,6 +217,78 @@ describe("workflow runtime", () => {
     expect(observedInputs).toEqual([""]);
   });
 
+  it("forwards role visible output events before role completion", async () => {
+    const root = await createTempProject();
+    const projectDir = path.join(root, "project");
+    const artifactDir = path.join(root, "artifacts");
+    await mkdir(projectDir, { recursive: true });
+
+    const workflowPhases: WorkflowPhaseConfig[] = [
+      {
+        name: "plan",
+        hostRole: "planner",
+        needApproval: false,
+      },
+    ];
+    const projectConfig = createProjectConfig({
+      projectDir,
+      artifactDir,
+      workflow: createWorkflowSelection("bugfix"),
+      workflowPhases,
+    });
+    const artifactManager = new FileArtifactManager(projectConfig);
+    const taskState = createInitialTaskState(
+      "task_role_output_case",
+      "role_output_case",
+      workflowPhases,
+    );
+    await artifactManager.initializeTask(taskState.taskId);
+    await artifactManager.saveTaskContext({
+      taskId: taskState.taskId,
+      title: taskState.title,
+      description: "角色输出透传测试",
+      createdAt: Date.now(),
+      lastRuntimeId: "runtime_role_output_case",
+      projectConfig,
+    });
+
+    const controller = new DefaultWorkflowController({
+      taskState,
+      projectConfig,
+      eventEmitter: new EventEmitter(),
+      eventLogger: new MemoryEventLogger(),
+      artifactManager,
+      roleRegistry: new TestRoleRegistry({
+        planner: createRole("planner", async (_input, context) => {
+          await context.emitVisibleOutput?.({
+            message: "第一段分析\\n第二段分析",
+            kind: "progress",
+          });
+          await context.emitVisibleOutput?.({
+            message: "最终结论：进入实现阶段",
+            kind: "summary",
+          });
+
+          return {
+            summary: "planner done",
+            artifacts: [],
+          };
+        }),
+      }),
+    });
+
+    const events = await controller.run(taskState.taskId, "角色输出透传测试");
+    const eventTypes = events.map((event) => event.type);
+    const firstRoleOutputIndex = eventTypes.indexOf("role_output");
+    const roleEndIndex = eventTypes.indexOf("role_end");
+
+    expect(firstRoleOutputIndex).toBeGreaterThan(eventTypes.indexOf("role_start"));
+    expect(firstRoleOutputIndex).toBeLessThan(roleEndIndex);
+    expect(
+      events.filter((event) => event.type === "role_output").map((event) => event.message),
+    ).toEqual(["第一段分析\\n第二段分析", "最终结论：进入实现阶段"]);
+  });
+
   it("waits for user input on paused phases and resumes from the same phase", async () => {
     const root = await createTempProject();
     const projectDir = path.join(root, "project");

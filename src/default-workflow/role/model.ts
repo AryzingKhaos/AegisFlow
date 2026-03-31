@@ -5,6 +5,7 @@ import type {
   RoleName,
   RoleResult,
   RoleRuntime,
+  RoleVisibleOutput,
 } from "../shared/types";
 import { resolveRoleCodexConfig } from "./config";
 import {
@@ -54,6 +55,10 @@ export async function executeRoleAgent(input: {
   input: string;
 }): Promise<RoleResult> {
   const visibleArtifacts = await loadVisibleArtifacts(input.context.artifacts);
+  await emitRoleVisibleOutput(input.context, {
+    message: `角色 ${input.roleName} 已开始执行，当前阶段：${input.context.phase}。`,
+    kind: "progress",
+  });
   const executionPrompt = buildRoleExecutionPrompt(
     input.bootstrap.prompt,
     input.roleName,
@@ -64,7 +69,7 @@ export async function executeRoleAgent(input: {
   );
 
   if (input.bootstrap.config.executionMode === "stub") {
-    return buildStubRoleResult(
+    const stubResult = buildStubRoleResult(
       input.bootstrap,
       input.roleName,
       input.executionProfile,
@@ -73,6 +78,13 @@ export async function executeRoleAgent(input: {
       visibleArtifacts,
       executionPrompt,
     );
+
+    await emitRoleVisibleOutput(input.context, {
+      message: stubResult.summary,
+      kind: "summary",
+    });
+
+    return stubResult;
   }
 
   // 默认执行模式必须真实进入统一角色执行器，
@@ -85,6 +97,10 @@ export async function executeRoleAgent(input: {
     config: input.bootstrap.config,
   });
   const parsed = parseRoleResultPayload(rawContent);
+  await emitRoleVisibleOutput(input.context, {
+    message: parsed.summary,
+    kind: "summary",
+  });
 
   return {
     summary: parsed.summary,
@@ -94,6 +110,7 @@ export async function executeRoleAgent(input: {
       // 这些元信息用于后续确认一次角色输出到底走的是哪条执行链路，
       // 防止“看起来是 agent，实际又退回普通模型调用”的回归。
       agentConfigured: true,
+      visibleSummaryDelivered: true,
       executionMode: input.bootstrap.config.executionMode,
       agentExecutor: input.bootstrap.executor.executorKind,
       agentModel: input.bootstrap.config.model,
@@ -103,6 +120,13 @@ export async function executeRoleAgent(input: {
       visibleArtifactKeys: visibleArtifacts.map((artifact) => artifact.key),
     },
   };
+}
+
+async function emitRoleVisibleOutput(
+  context: ExecutionContext,
+  output: RoleVisibleOutput,
+): Promise<void> {
+  await context.emitVisibleOutput?.(output);
 }
 
 function buildRoleExecutionPrompt(
@@ -239,6 +263,7 @@ function buildStubRoleResult(
       // stub 只服务测试与离线校验，元信息里显式打标，
       // 避免把它误认为正式生产链路。
       agentConfigured: true,
+      visibleSummaryDelivered: true,
       executionMode: "stub",
       agentExecutor: "stub",
       agentModel: bootstrap.config.model,

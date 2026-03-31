@@ -104,6 +104,7 @@ export type WorkflowEventType =
   | "phase_end"
   | "role_start"
   | "role_end"
+  | "role_output"
   | "artifact_created"
   | "progress"
   | "error";
@@ -153,6 +154,11 @@ export interface RoleCapabilityProfile {
   focus: string;
 }
 
+export interface RoleVisibleOutput {
+  message: string;
+  kind?: "progress" | "summary" | "artifact" | "result";
+}
+
 export interface ExecutionContext {
   taskId: string;
   phase: Phase;
@@ -160,6 +166,7 @@ export interface ExecutionContext {
   artifacts: ArtifactReader;
   projectConfig: ProjectConfig;
   roleCapabilityProfile: RoleCapabilityProfile;
+  emitVisibleOutput?: (output: RoleVisibleOutput) => Promise<void>;
 }
 
 export interface EventLogger {
