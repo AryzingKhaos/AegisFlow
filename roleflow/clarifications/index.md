@@ -23,4 +23,5 @@
 | `0.1.0` | `default-workflow-role-codex-agent` | [0.1.0/default-workflow-role-codex-agent-prd.md](0.1.0/default-workflow-role-codex-agent-prd.md) |
 | `0.1.0` | `default-workflow-role-codex-cli` | [0.1.0/default-workflow-role-codex-cli-prd.md](0.1.0/default-workflow-role-codex-cli-prd.md) |
 | `0.1.0` | `default-workflow-role-codex-cli-output-passthrough` | [0.1.0/default-workflow-role-codex-cli-output-passthrough-prd.md](0.1.0/default-workflow-role-codex-cli-output-passthrough-prd.md) |
+| `0.1.0` | `default-workflow-role-node-pty-subcommand` | [0.1.0/default-workflow-role-node-pty-subcommand-prd.md](0.1.0/default-workflow-role-node-pty-subcommand-prd.md) |
 | `0.1.0` | `default-workflow-role-prompt-bootstrap` | [0.1.0/default-workflow-role-prompt-bootstrap-prd.md](0.1.0/default-workflow-role-prompt-bootstrap-prd.md) |

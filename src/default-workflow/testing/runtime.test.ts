@@ -548,6 +548,141 @@ describe("workflow runtime", () => {
     expect(snapshot).toContain("status: completed");
   });
 
+  it("routes participate input to the active role while task is running", async () => {
+    const root = await createTempProject();
+    const projectDir = path.join(root, "project");
+    const artifactDir = path.join(root, "artifacts");
+    await mkdir(projectDir, { recursive: true });
+
+    const workflowPhases: WorkflowPhaseConfig[] = [
+      {
+        name: "build",
+        hostRole: "builder",
+        needApproval: false,
+      },
+    ];
+    const projectConfig = createProjectConfig({
+      projectDir,
+      artifactDir,
+      workflow: createWorkflowSelection("feature_change"),
+      workflowPhases,
+    });
+    const artifactManager = new FileArtifactManager(projectConfig);
+    const taskState = createInitialTaskState(
+      "task_active_role_input_case",
+      "active_role_input_case",
+      workflowPhases,
+    );
+    taskState.currentPhase = "build";
+    taskState.phaseStatus = "running";
+    taskState.status = TaskStatus.RUNNING;
+    await artifactManager.initializeTask(taskState.taskId);
+    await artifactManager.saveTaskContext({
+      taskId: taskState.taskId,
+      title: taskState.title,
+      description: "运行中输入透传",
+      createdAt: Date.now(),
+      lastRuntimeId: "runtime_active_role_input_case",
+      projectConfig,
+    });
+
+    const roleRegistry = new TrackableRoleRegistry({
+      builder: createRole("builder", async () => ({
+        summary: "builder done",
+        artifacts: [],
+      })),
+    });
+    roleRegistry.activate("builder");
+    const controller = new DefaultWorkflowController({
+      taskState,
+      projectConfig,
+      eventEmitter: new EventEmitter(),
+      eventLogger: new MemoryEventLogger(),
+      artifactManager,
+      roleRegistry,
+    });
+
+    const events = await controller.handleIntakeEvent({
+      type: "participate",
+      taskId: taskState.taskId,
+      message: "这是发给 active role 的输入",
+      timestamp: Date.now(),
+    });
+
+    expect(roleRegistry.forwardedInputs).toEqual(["这是发给 active role 的输入"]);
+    expect(events.at(0)?.message).toBe("已将输入加入当前 active role 的后续处理队列。");
+  });
+
+  it("does not report participation success when active role rejects input delivery", async () => {
+    const root = await createTempProject();
+    const projectDir = path.join(root, "project");
+    const artifactDir = path.join(root, "artifacts");
+    await mkdir(projectDir, { recursive: true });
+
+    const workflowPhases: WorkflowPhaseConfig[] = [
+      {
+        name: "build",
+        hostRole: "builder",
+        needApproval: false,
+      },
+    ];
+    const projectConfig = createProjectConfig({
+      projectDir,
+      artifactDir,
+      workflow: createWorkflowSelection("feature_change"),
+      workflowPhases,
+    });
+    const artifactManager = new FileArtifactManager(projectConfig);
+    const taskState = createInitialTaskState(
+      "task_active_role_input_rejected",
+      "active_role_input_rejected",
+      workflowPhases,
+    );
+    taskState.currentPhase = "build";
+    taskState.phaseStatus = "running";
+    taskState.status = TaskStatus.RUNNING;
+    await artifactManager.initializeTask(taskState.taskId);
+    await artifactManager.saveTaskContext({
+      taskId: taskState.taskId,
+      title: taskState.title,
+      description: "运行中输入拒收",
+      createdAt: Date.now(),
+      lastRuntimeId: "runtime_active_role_input_rejected",
+      projectConfig,
+    });
+
+    const roleRegistry = new TrackableRoleRegistry({
+      builder: createRole("builder", async () => ({
+        summary: "builder done",
+        artifacts: [],
+      })),
+    });
+    roleRegistry.activate("builder");
+    roleRegistry.deliveryResult = {
+      accepted: false,
+      mode: "rejected",
+      reason: "executor_unavailable",
+    };
+    const controller = new DefaultWorkflowController({
+      taskState,
+      projectConfig,
+      eventEmitter: new EventEmitter(),
+      eventLogger: new MemoryEventLogger(),
+      artifactManager,
+      roleRegistry,
+    });
+
+    const events = await controller.handleIntakeEvent({
+      type: "participate",
+      taskId: taskState.taskId,
+      message: "这是可能被丢弃的输入",
+      timestamp: Date.now(),
+    });
+
+    expect(events.at(0)?.type).toBe("error");
+    expect(events.at(0)?.message).toBe("当前 active role 暂未就绪，输入未透传，请稍后重试。");
+  });
+
   it("converges to failed state when role execution throws", async () => {
     const root = await createTempProject();
     const projectDir = path.join(root, "project");
@@ -606,7 +741,7 @@ describe("workflow runtime", () => {
     expect(taskState.phaseStatus).toBe("pending");
     expect(events.at(-2)?.type).toBe("error");
     expect(events.at(-1)?.type).toBe("task_end");
-    expect(roleRegistry.disposeAllCalls).toBe(1);
+    expect(roleRegistry.disposeAllCalls).toBe(0);
     expect(logger.events.some((event) => event.type === "error")).toBe(true);
 
     const snapshotPath = path.join(
@@ -685,10 +820,10 @@ describe("workflow runtime", () => {
     expect(taskState.status).toBe(TaskStatus.COMPLETED);
     expect(taskState.phaseStatus).toBe("done");
     expect(taskState.resumeFrom).toBeUndefined();
-    expect(roleRegistry.disposeAllCalls).toBe(1);
+    expect(roleRegistry.disposeAllCalls).toBe(0);
   });
 
-  it("disposes role sessions after task completes normally", async () => {
+  it("keeps role sessions after task completes normally", async () => {
     const root = await createTempProject();
     const projectDir = path.join(root, "project");
     const artifactDir = path.join(root, "artifacts");
@@ -741,7 +876,7 @@ describe("workflow runtime", () => {
     await controller.run(taskState.taskId, "完成后清理会话");
 
     expect(taskState.status).toBe(TaskStatus.COMPLETED);
-    expect(roleRegistry.disposeAllCalls).toBe(1);
+    expect(roleRegistry.disposeAllCalls).toBe(0);
   });
 
   it("settles phaseStatus when cancelling a running task", async () => {
@@ -806,7 +941,7 @@ describe("workflow runtime", () => {
 
     expect(taskState.status).toBe(TaskStatus.FAILED);
     expect(taskState.phaseStatus).toBe("pending");
-    expect(roleRegistry.disposeAllCalls).toBe(1);
+    expect(roleRegistry.disposeAllCalls).toBe(0);
   });
 
   it("preserves resume point when interrupted during approval wait", async () => {
@@ -855,6 +990,7 @@ class MemoryEventLogger implements EventLogger {
 
 class TestRoleRegistry implements RoleRegistry {
   private readonly roles: Map<RoleName, Role>;
+  private activeRoleName?: RoleName;
 
   public constructor(partialRoles: Partial<Record<RoleName, Role>>) {
     this.roles = new Map(
@@ -870,6 +1006,24 @@ class TestRoleRegistry implements RoleRegistry {
     }
 
     return role;
+  }
+
+  public activate(name: RoleName): Role {
+    const role = this.get(name);
+    this.activeRoleName = name;
+    return role;
+  }
+
+  public getActive(): Role | undefined {
+    if (!this.activeRoleName) {
+      return undefined;
+    }
+
+    return this.roles.get(this.activeRoleName);
+  }
+
+  public getActiveRoleName(): RoleName | undefined {
+    return this.activeRoleName;
   }
 
   public register(roleDef: RoleDefinition): void {
@@ -892,9 +1046,23 @@ class TestRoleRegistry implements RoleRegistry {
 
 class TrackableRoleRegistry extends TestRoleRegistry {
   public disposeAllCalls = 0;
+  public forwardedInputs: string[] = [];
+  public deliveryResult = {
+    accepted: true,
+    mode: "queued" as const,
+  };
+
+  public override activate(name: RoleName): Role {
+    return super.activate(name);
+  }
 
   public async disposeAll(): Promise<void> {
     this.disposeAllCalls += 1;
+  }
+
+  public async sendInputToActiveRole(input: string) {
+    this.forwardedInputs.push(input);
+    return this.deliveryResult;
   }
 }
 

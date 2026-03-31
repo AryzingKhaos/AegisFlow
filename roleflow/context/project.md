@@ -128,9 +128,9 @@ flowchart LR
    R[Runtime（存放在内存中）]
    F[文件系统]
    CODE[真实代码]
-   L1[Intake 层,是Agent,判断任务类型,选择workflow,获取用户输入,展示workflow的消息,UI层]
-   L2[Workflow 层，实例 WorkflowController。phase是workflow的内置状态之一]
-   L3[Role层，通过 RoleRegister 管理角色，都是Agent，根据Phase确定主持人。本期只有主持人，没有其他角色]
+   L1[Intake 层,是Agent,判断任务类型,选择workflow,获取用户输入,展示当前 active role 的消息,UI层]
+   L2[Workflow 层，实例 WorkflowController。只负责 phase 编排、active role 决定与输入输出路由]
+   L3[Role层，通过 RoleRegistry 管理多个 role 子命令行。每个 role 都是 node-pty 启动的 codex cli 会话]
    Role1[Clarifier]
    Role2[Explorer]
    Role3[Planner]
@@ -139,6 +139,8 @@ flowchart LR
    Role6[TestDesigner]
    Role7[Tester]
    Role8[TestWriter]
+   PTY[node-pty]
+   CLI[codex cli]
 
    R -->|TaskState、EventEmitter| L1
    R -->|ArtifactManager、EventEmitter、EventLogger、ProjectConfig| L2
@@ -146,38 +148,32 @@ flowchart LR
 
    U --> L1
    L1 -->|IntakeEvent| L2
-   L2 -->|WorkflowEvent / role_output| L1
-   L2 -->|直接调用| L3
+   L2 -->|WorkflowEvent / active role_output| L1
+   L1 -->|用户输入透传到 active role| L2
+   L2 -->|根据当前 phase 选择并路由到 active role| L3
 
-   L3 -->|角色执行结果 / 增量可见输出| L2
+   L3 -->|active role 输出 / 最终结果| L2
    L2 -->|artifact工件| F
 
-   L2 -->|用户需求| L3
-   L3 -->|执行澄清任务| Role1
-   Role1 -->|artifact完整澄清的用户需求| L2
-   L2 -->|artifact完整澄清的用户需求| L3
-   L3 -->|执行探索任务| Role2
-   Role2 -->|artifact根据需求解释相关代码| L2
-   L2 -->|artifact完整澄清的用户需求 + artifact根据需求解释相关代码| L3
-   L3 -->|执行规划任务| Role3
-   Role3 -->|artifact计划文档| L2
-   L2 -->|artifact计划文档| L3
-   L3 -->|执行实现任务| Role4
+   L3 --> Role1
+   L3 --> Role2
+   L3 --> Role3
+   L3 --> Role4
+   L3 --> Role5
+   L3 --> Role6
+   L3 --> Role7
+   L3 --> Role8
+   Role1 --> PTY
+   Role2 --> PTY
+   Role3 --> PTY
+   Role4 --> PTY
+   Role5 --> PTY
+   Role6 --> PTY
+   Role7 --> PTY
+   Role8 --> PTY
+   PTY --> CLI
    Role4 -->|修改代码| CODE
-   Role4 -->|artifact修改代码总结| L2
-   L2 -->|artifact修改代码总结 + git修改区内容| L3
-   L3 -->|执行审查任务| Role5
-   Role5 -->|artifact代码review报告| L2
-   L2 -->|artifact修改代码总结 + git修改区内容| L3
-   L3 -->|执行测试设计任务| Role6
-   Role6 -->|artifact代码修改测试建议| L2
-   L2 -->|artifact修改代码总结 + git修改区内容| L3
-   L3 -->|执行测试任务| Role7
-   Role7 -->|artifact测试执行结果| L2
-   L2 -->|artifact修改代码总结 + git修改区内容| L3
-   L3 -->|执行单测编写任务| Role8
    Role8 -->|添加/修改单元测试| CODE
-   Role8 -->|artifact代码单元测试| L2
 ```
 
 
@@ -187,10 +183,8 @@ sequenceDiagram
   participant U as 用户
   participant IA as IntakeAgent
   participant WF as Workflow
-  participant RRT as RoleRuntime
   participant RR as RoleRegistry
-  participant RD as RoleDefinition
-  participant R as Role
+  participant R as Active Role PTY
   participant AM as ArtifactManager
   participant CODE as 代码库
 
@@ -202,41 +196,44 @@ sequenceDiagram
   %% CLARIFY
   WF->>RR: get(clarifier)
   alt 未注册
-    WF->>RR: register(roleDef)
-    WF->>RRT: 构造 RoleRuntime
-    RR->>RD: create(roleRuntime)
-    RD-->>RR: role
+    WF->>RR: register(clarifier terminal)
   end
-  RR-->>WF: role
-  WF->>R: run(input, ExecutionContext)
-  loop 角色持续执行
+  WF->>RR: activate(clarifier)
+  RR-->>WF: active role
+  IA->>WF: 用户输入 / 控制命令
+  WF->>R: 透传到 active role
+  loop active role 持续执行
     R-->>WF: 用户可见增量输出
     WF-->>IA: WorkflowEvent(role_output)
-    IA-->>U: 原样实时展示
+    IA-->>U: 实时展示
   end
   R-->>WF: RoleResult
   WF->>AM: 保存 artifact
 
   %% EXPLORE
   WF->>RR: get(explorer)
-  RR-->>WF: role
-  WF->>R: run(input, ExecutionContext)
-  loop 角色持续执行
+  WF->>RR: activate(explorer)
+  RR-->>WF: active role
+  IA->>WF: 用户输入 / 控制命令
+  WF->>R: 透传到 active role
+  loop active role 持续执行
     R-->>WF: 用户可见增量输出
     WF-->>IA: WorkflowEvent(role_output)
-    IA-->>U: 原样实时展示
+    IA-->>U: 实时展示
   end
   R-->>WF: RoleResult
   WF->>AM: 保存 artifact
 
   %% PLAN
   WF->>RR: get(planner)
-  RR-->>WF: role
-  WF->>R: run(input, ExecutionContext)
-  loop 角色持续执行
+  WF->>RR: activate(planner)
+  RR-->>WF: active role
+  IA->>WF: 用户输入 / 控制命令
+  WF->>R: 透传到 active role
+  loop active role 持续执行
     R-->>WF: 用户可见增量输出
     WF-->>IA: WorkflowEvent(role_output)
-    IA-->>U: 原样实时展示
+    IA-->>U: 实时展示
   end
   R-->>WF: RoleResult
   WF->>AM: 保存 artifact
@@ -250,24 +247,28 @@ sequenceDiagram
 
   %% 恢复（重跑整个 phase）
   WF->>RR: get(planner)
-  RR-->>WF: role
-  WF->>R: run(input, ExecutionContext)
-  loop 角色持续执行
+  WF->>RR: activate(planner)
+  RR-->>WF: active role
+  IA->>WF: 用户输入 / 控制命令
+  WF->>R: 透传到 active role
+  loop active role 持续执行
     R-->>WF: 用户可见增量输出
     WF-->>IA: WorkflowEvent(role_output)
-    IA-->>U: 原样实时展示
+    IA-->>U: 实时展示
   end
   R-->>WF: RoleResult
   WF->>AM: 保存 artifact
 
   %% BUILD
   WF->>RR: get(builder)
-  RR-->>WF: role
-  WF->>R: run(input, ExecutionContext)
-  loop 角色持续执行
+  WF->>RR: activate(builder)
+  RR-->>WF: active role
+  IA->>WF: 用户输入 / 控制命令
+  WF->>R: 透传到 active role
+  loop active role 持续执行
     R-->>WF: 用户可见增量输出
     WF-->>IA: WorkflowEvent(role_output)
-    IA-->>U: 原样实时展示
+    IA-->>U: 实时展示
   end
   R->>CODE: 修改代码
   R-->>WF: RoleResult
@@ -275,48 +276,56 @@ sequenceDiagram
 
   %% REVIEW
   WF->>RR: get(critic)
-  RR-->>WF: role
-  WF->>R: run(input, ExecutionContext)
-  loop 角色持续执行
+  WF->>RR: activate(critic)
+  RR-->>WF: active role
+  IA->>WF: 用户输入 / 控制命令
+  WF->>R: 透传到 active role
+  loop active role 持续执行
     R-->>WF: 用户可见增量输出
     WF-->>IA: WorkflowEvent(role_output)
-    IA-->>U: 原样实时展示
+    IA-->>U: 实时展示
   end
   R-->>WF: RoleResult
   WF->>AM: 保存 artifact
 
   %% TEST DESIGN
   WF->>RR: get(test-designer)
-  RR-->>WF: role
-  WF->>R: run(input, ExecutionContext)
-  loop 角色持续执行
+  WF->>RR: activate(test-designer)
+  RR-->>WF: active role
+  IA->>WF: 用户输入 / 控制命令
+  WF->>R: 透传到 active role
+  loop active role 持续执行
     R-->>WF: 用户可见增量输出
     WF-->>IA: WorkflowEvent(role_output)
-    IA-->>U: 原样实时展示
+    IA-->>U: 实时展示
   end
   R-->>WF: RoleResult
   WF->>AM: 保存 artifact
 
   %% TEST
   WF->>RR: get(tester)
-  RR-->>WF: role
-  WF->>R: run(input, ExecutionContext)
-  loop 角色持续执行
+  WF->>RR: activate(tester)
+  RR-->>WF: active role
+  IA->>WF: 用户输入 / 控制命令
+  WF->>R: 透传到 active role
+  loop active role 持续执行
     R-->>WF: 用户可见增量输出
     WF-->>IA: WorkflowEvent(role_output)
-    IA-->>U: 原样实时展示
+    IA-->>U: 实时展示
   end
   R-->>WF: RoleResult
   WF->>AM: 保存 artifact
 
   %% UNIT TEST
   WF->>RR: get(test-writer)
-  RR-->>WF: role
-  WF->>R: run(input, ExecutionContext)
-  loop 角色持续执行
+  WF->>RR: activate(test-writer)
+  RR-->>WF: active role
+  IA->>WF: 用户输入 / 控制命令
+  WF->>R: 透传到 active role
+  loop active role 持续执行
     R-->>WF: 用户可见增量输出
     WF-->>IA: WorkflowEvent(role_output)
-    IA-->>U: 原样实时展示
+    IA-->>U: 实时展示
   end
   R->>CODE: 添加/修改单元测试
   R-->>WF: RoleResult
@@ -404,11 +413,14 @@ interface ProjectConfig {
    workflowPhases: Phase[]; // workflow阶段的配置，v0.1版本可以先写死
 }
 
-// 用于管理所有角色，是一个角色工厂。workflow用到角色的时候从工厂里获取，如果没有再重新注册
+// 用于管理所有 role 子命令行。registry 负责“有哪些 role 当前存在”，active role 由 workflow 根据 phase 决定
 interface RoleRegistry {
    register: (roleDef: RoleDefinition) => void;
    get: (name: string) => Role;
    list(): string[];
+   activate: (name: string) => void;
+   getActive(): Role | undefined;
+   destroyAll(): Promise<void>;
 }
 
 // 角色蓝图，也就是角色职责
@@ -418,10 +430,13 @@ interface RoleDefinition {
   create: (runtime: RoleRuntime) => Role;
 }
 
-// 具体的、实例化的角色
+// 具体的、实例化的角色。运行时实体是一个由 node-pty 启动的 codex cli 子命令行会话
 interface Role {
    name: string;
-   run(input: any, context: ExecutionContext): Promise<RoleResult>
+   isActive?: boolean;
+   write(input: string): Promise<void>;
+   destroy(): Promise<void>;
+   collectResult(context: ExecutionContext): Promise<RoleResult>;
 }
 
 // Role 返回的结构化结果
@@ -460,9 +475,11 @@ Intake本身是一个Agent，所以对象应该叫 IntakeAgent？
 	 - 继续未完成的任务
 	 - 对任务的内容进行补充
  - 负责跟用户沟通，将用户的需求规范化传给workflow
- - 接收workflow层的消息，实时展示到CLI上
+ - 接收 workflow 层转发的 active role 消息，实时展示到 CLI 上
+ - 用户输入默认透传给当前 active role
  - 对展示到 CLI 的文本做基础排版，至少支持换行、段落、列表和代码块边界
  - 初始化Runtime对象
+ - Intake 销毁时需要触发全部 role 子命令行销毁
  - 给 workflow 发送 IntakeEvent，接收 workflow 的 WorkflowEvent
 
 ```typescript
@@ -495,13 +512,14 @@ type IntakeEvent = {
  - 驱动 TaskState 状态机（phase 流转 + 中断恢复）
  - 不是Agent。
  - 唯一的 Runtime.TaskState 的合法修改者，并保存 TaskState 的快照到md文件里，保证进程被打断的时候，下一次启动可以直接继续上一次的任务
- - 接收 intake 层的指令。准确地说，是接收 TaskStatus 变更的指令，然后将 intake 层的用户要求透传给 role 层的具体 agent。
+ - 接收 intake 层的指令。准确地说，是接收 TaskStatus 变更的指令，并将 intake 层的用户要求透传给当前 active role。
  - 接收 role 层返回的最终结果，调用 ArtifactManager ，写工件
- - 在角色执行过程中，承担 Role 用户可见增量输出到 Intake 的统一转发职责
+ - 根据当前 phase 决定哪个 role 处于 active 状态
+ - 在角色执行过程中，承担 active role 用户可见增量输出到 Intake 的统一转发职责
  - 写 EventLogger 日志
  - 更新 TaskStatus 状态
  - 从 intake 层接受 IntakeEvent，给 intake 层发送 WorkflowEvent
- - 直接调用 role
+ - 不负责 role 内部执行逻辑，只负责 phase 编排、active role 切换和输入输出路由
 
 ```typescript
 
@@ -509,7 +527,9 @@ interface WorkflowController {
    run(taskId: string): Promise<void>;
    resume(taskId: string, input?: any): Promise<void>; // input是额外的用户补充内容?
    runPhase(phase: PhaseConfig): Promise<void>; // PhaseConfig是什么没想好。
-   runRole(roleName: string, input: any): Promise<RoleResult>;
+   setActiveRole(roleName: string): void;
+   routeInputToActiveRole(input: string): Promise<void>;
+   collectRoleResult(roleName: string): Promise<RoleResult>;
 }
 
 // todos: WorkflowEventType 应该转变为枚举
@@ -561,10 +581,13 @@ type LogEvent = {
 
 #### Role层
  - 都是agent
- - 接受workflow层的指令，执行任务。
+ - 每个 role 的运行时实体都是一个由 node-pty 启动的 codex cli 子命令行
+ - 接受 workflow 层的 phase 激活与输入路由
  - 副作用，比如修改代码、修改单测
  - 角色执行链路可以复用外部 Agent CLI session；AegisFlow 优先复用其现成工具能力，而不是在本系统内重复实现读写文件、搜索、Git 等通用工具
+ - 多个 role 可以同时存在，但只有 active role 能向 Intake 输出，也只有 active role 能接收 Intake 输入
  - 执行过程中可以产生用户可见的增量输出，但不能直接写 CLI，必须通过 Workflow 转发
+ - 任务完成后但 Intake 未销毁时，role 子命令行可以继续保留
  - 返回执行任务的最终结果，但不包含写工件的工作
 
 

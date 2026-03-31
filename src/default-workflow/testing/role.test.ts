@@ -5,7 +5,10 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { FileArtifactManager } from "../persistence/task-store";
 import { resolveRoleCodexConfig } from "../role/config";
-import { CodexCliRoleAgentExecutor } from "../role/executor";
+import {
+  CodexCliRoleAgentExecutor,
+  createPersistentCodexCliSession,
+} from "../role/executor";
 import { buildRolePrompt } from "../role/prompts";
 import { executeRoleAgent, type RoleAgentBootstrap } from "../role/model";
 import {
@@ -829,12 +832,160 @@ describe("role layer", () => {
     expect(second).toContain("result-2");
     expect(observedArgs[0][0]).toBe("exec");
     expect(observedArgs[0]).not.toContain("resume");
+    expect(observedArgs[0].at(-1)).toBe("FIRST_PROMPT");
+    expect(observedArgs[0]).not.toContain("-");
     expect(observedArgs[0]).toContain('-c');
     expect(observedArgs[0]).toContain('openai_base_url="https://api.openai.com/v1"');
     expect(observedArgs[1].slice(0, 2)).toEqual(["exec", "resume"]);
     expect(observedArgs[1]).toContain("session-builder-1");
+    expect(observedArgs[1].at(-1)).toBe("SECOND_PROMPT");
+    expect(observedArgs[1]).not.toContain("-");
     expect(observedArgs[1]).toContain('-c');
     expect(observedArgs[1]).toContain('openai_base_url="https://api.openai.com/v1"');
+  });
+
+  it("reuses the same persistent PTY session instance across repeated executions", async () => {
+    const root = await createTempProject();
+    const projectDir = path.join(root, "project");
+    await mkdir(projectDir, { recursive: true });
+
+    const observedCommands: string[][] = [];
+    const forwardedInputs: string[] = [];
+    let sessionCreateCount = 0;
+    const executor = new CodexCliRoleAgentExecutor({
+      createPersistentSession() {
+        sessionCreateCount += 1;
+
+        return {
+          async executeCommand(_file, args, options) {
+            observedCommands.push(args);
+            options.onStdoutLine?.('{"type":"thread.started","thread_id":"session-builder-1"}');
+            const outputPath = args[args.indexOf("--output-last-message") + 1];
+            await writeFile(
+              outputPath,
+              JSON.stringify({
+                summary: `result-${observedCommands.length}`,
+                artifacts: [],
+              }),
+              "utf8",
+            );
+          },
+          async sendInput(input: string) {
+            forwardedInputs.push(input);
+            return {
+              accepted: true,
+              mode: "queued" as const,
+            };
+          },
+          async shutdown() {
+            return;
+          },
+        };
+      },
+    });
+
+    const context = {
+      taskId: "task_persistent_pty_case",
+      phase: "build" as const,
+      cwd: projectDir,
+      projectConfig: createProjectConfig({
+        projectDir,
+        artifactDir: path.join(root, "artifacts"),
+        workflow: createWorkflowSelection("bugfix"),
+      }),
+      roleCapabilityProfile: createCapabilityProfile("builder"),
+      artifacts: {
+        async get() {
+          return undefined;
+        },
+        async list() {
+          return [];
+        },
+      },
+    };
+
+    await executor.execute({
+      roleName: "builder",
+      prompt: "FIRST_PROMPT",
+      context,
+      executionProfile: createCapabilityProfile("builder"),
+      config: {
+        model: "codex-5.4",
+        baseUrl: "https://api.openai.com/v1",
+        apiKey: "dummy",
+        executionMode: "agent",
+        sources: {
+          model: "default",
+          baseUrl: "default",
+          apiKey: "OPENAI_API_KEY",
+          executionMode: "default",
+        },
+      },
+    });
+
+    await executor.execute({
+      roleName: "builder",
+      prompt: "SECOND_PROMPT",
+      context,
+      executionProfile: createCapabilityProfile("builder"),
+      config: {
+        model: "codex-5.4",
+        baseUrl: "https://api.openai.com/v1",
+        apiKey: "dummy",
+        executionMode: "agent",
+        sources: {
+          model: "default",
+          baseUrl: "default",
+          apiKey: "OPENAI_API_KEY",
+          executionMode: "default",
+        },
+      },
+    });
+
+    const delivery = await executor.sendInput?.("补充说明");
+
+    expect(sessionCreateCount).toBe(1);
+    expect(observedCommands).toHaveLength(2);
+    expect(forwardedInputs).toEqual(["补充说明"]);
+    expect(delivery).toEqual({
+      accepted: true,
+      mode: "queued",
+    });
+  });
+
+  it("marks the persistent PTY session unavailable after idle shell exit", async () => {
+    const terminal = new FakeNodePtyTerminal();
+    const session = createPersistentCodexCliSession({
+      nodePtyModule: {
+        spawn() {
+          return terminal;
+        },
+      },
+      shell: {
+        file: "/bin/sh",
+        args: [],
+      },
+      env: {},
+    });
+
+    terminal.emitExit({ exitCode: 1 });
+
+    await expect(
+      session.executeCommand("codex", ["exec"], {
+        cwd: "/tmp",
+        input: "",
+        env: {},
+        timeoutMs: 100,
+      }),
+    ).rejects.toThrow("codex PTY session exited unexpectedly");
+
+    await expect(session.sendInput("补充说明")).resolves.toEqual({
+      accepted: false,
+      mode: "rejected",
+      reason: "session_unavailable",
+    });
+
+    await expect(session.shutdown()).resolves.toBeUndefined();
   });
 
   it("passes read-only ExecutionContext into roles and persists string artifacts", async () => {
@@ -989,4 +1140,33 @@ async function createTempProject(): Promise<string> {
   const root = await mkdtemp(path.join(os.tmpdir(), "aegisflow-role-"));
   tempDirs.push(root);
   return root;
+}
+
+class FakeNodePtyTerminal {
+  private dataListeners: Array<(data: string) => void> = [];
+  private exitListeners: Array<
+    (event: { exitCode: number; signal?: number }) => void
+  > = [];
+
+  public onData(listener: (data: string) => void): void {
+    this.dataListeners.push(listener);
+  }
+
+  public onExit(listener: (event: { exitCode: number; signal?: number }) => void): void {
+    this.exitListeners.push(listener);
+  }
+
+  public write(_data: string): void {
+    return;
+  }
+
+  public kill(): void {
+    return;
+  }
+
+  public emitExit(event: { exitCode: number; signal?: number }): void {
+    for (const listener of this.exitListeners) {
+      listener(event);
+    }
+  }
 }

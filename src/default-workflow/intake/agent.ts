@@ -30,6 +30,7 @@ import type {
   WorkflowEvent,
   WorkflowTaskType,
 } from "../shared/types";
+import { TaskStatus } from "../shared/types";
 import {
   describeWorkflowGuess,
   inferWorkflowTaskType,
@@ -159,6 +160,40 @@ export class IntakeAgent {
       lines,
       shouldExit: false,
     };
+  }
+
+  public shouldHandleInputAsLiveParticipation(rawInput: string): boolean {
+    const input = rawInput.trim();
+
+    if (
+      input.length === 0 ||
+      this.pendingStep ||
+      !this.runtime ||
+      this.runtime.taskState.status !== TaskStatus.RUNNING
+    ) {
+      return false;
+    }
+
+    // CLI 只对“运行中补充说明”开放并行透传；
+    // 取消、恢复、超范围等控制语义仍保留在主串行链路里处理。
+    return normalizeUserIntent(input, true).type === "participate";
+  }
+
+  public async dispose(): Promise<void> {
+    if (!this.runtime) {
+      return;
+    }
+
+    try {
+      // Role 子命令行的统一回收时机收口到 Intake 生命周期，
+      // 任务终态后也允许继续保留，直到宿主 CLI/Intake 结束。
+      await this.runtime.roleRegistry.disposeAll?.();
+    } finally {
+      this.runtime.eventEmitter.removeAllListeners("workflow_event");
+      this.runtime = undefined;
+      this.persistedContext = undefined;
+      this.workflowOutputBuffer = [];
+    }
   }
 
   private async handlePendingStep(input: string): Promise<string[]> {
@@ -329,6 +364,16 @@ export class IntakeAgent {
   }
 
   private async resumeTask(message: string): Promise<string[]> {
+    if (this.runtime && !this.isTerminalTaskState()) {
+      if (this.runtime.taskState.status === TaskStatus.RUNNING) {
+        // 运行中的任务已经处于主流程内，不能再触发 resume_task；
+        // 否则 Workflow 会把当前 phase 重新置回 pending 并重跑一轮。
+        return ["当前任务正在执行中，无需恢复。"];
+      }
+
+      return this.dispatchRuntimeEvent("resume_task", message);
+    }
+
     // 先使用显式记录的恢复索引，再回退到默认工件目录扫描，
     // 这样既能保证准确性，也保留兼容路径。
     const persistedContext =

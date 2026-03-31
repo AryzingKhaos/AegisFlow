@@ -3,6 +3,7 @@ import path from "node:path";
 import type { EventEmitter } from "node:events";
 import type {
   EventLogger,
+  InputDeliveryResult,
   ProjectConfig,
   Role,
   RoleCapabilityProfile,
@@ -39,6 +40,7 @@ interface DefaultRoleRegistryDependencies {
 export class DefaultRoleRegistry implements RoleRegistry {
   private readonly roleDefinitions = new Map<RoleName, RoleDefinition>();
   private readonly roleInstances = new Map<RoleName, Role>();
+  private activeRoleName?: RoleName;
 
   public constructor(
     private readonly dependencies: DefaultRoleRegistryDependencies,
@@ -75,6 +77,47 @@ export class DefaultRoleRegistry implements RoleRegistry {
     return role;
   }
 
+  public activate(name: RoleName): Role {
+    const role = this.get(name);
+    // phase 决定哪个 role active；
+    // 注册表只记录当前 active 状态，不负责自行做 phase 推导。
+    this.activeRoleName = name;
+    return role;
+  }
+
+  public getActive(): Role | undefined {
+    if (!this.activeRoleName) {
+      return undefined;
+    }
+
+    // active role 只代表当前 Intake/Workflow 双向通路指向谁，
+    // 不代表其他 role 会话不存在。
+    return this.roleInstances.get(this.activeRoleName);
+  }
+
+  public getActiveRoleName(): RoleName | undefined {
+    return this.activeRoleName;
+  }
+
+  public async sendInputToActiveRole(input: string): Promise<InputDeliveryResult> {
+    if (!this.activeRoleName) {
+      return {
+        accepted: false,
+        mode: "rejected",
+        reason: "no_active_role",
+      };
+    }
+
+    const role = this.roleInstances.get(this.activeRoleName) ?? this.get(this.activeRoleName);
+    return (
+      (await role.sendInput?.(input)) ?? {
+        accepted: false,
+        mode: "rejected",
+        reason: "executor_unavailable",
+      }
+    );
+  }
+
   public list(): string[] {
     return [...this.roleDefinitions.keys()].sort();
   }
@@ -87,6 +130,7 @@ export class DefaultRoleRegistry implements RoleRegistry {
         await role.dispose?.();
       }),
     );
+    this.activeRoleName = undefined;
     this.roleInstances.clear();
   }
 
@@ -184,6 +228,17 @@ function createDefaultRoleDefinition(
             context,
             input,
           });
+        },
+        async sendInput(input) {
+          const bootstrap = await ensureBootstrap();
+
+          return (
+            (await bootstrap.executor.sendInput?.(input)) ?? {
+              accepted: false,
+              mode: "rejected",
+              reason: "executor_unavailable",
+            }
+          );
         },
         async dispose() {
           if (!bootstrapPromise) {

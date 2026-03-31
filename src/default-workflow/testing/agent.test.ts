@@ -113,6 +113,117 @@ describe("IntakeAgent", () => {
     expect(streamedLines.join("\n")).not.toContain(">>> 角色输出｜");
   });
 
+  it("reuses the current runtime when resuming inside the same intake session", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "aegisflow-agent-"));
+    tempDirs.push(root);
+    const projectDir = path.join(root, "project");
+    await mkdir(projectDir, { recursive: true });
+
+    const agent = new IntakeAgent(root);
+    await agent.handleUserInput("修复登录报错");
+    await agent.handleUserInput("y");
+    await agent.handleUserInput("y");
+    await agent.handleUserInput(projectDir);
+    await agent.handleUserInput("");
+    await agent.handleInterruptSignal();
+
+    const runtimeIdBeforeResume = (agent as unknown as { runtime?: { runtimeId: string } })
+      .runtime?.runtimeId;
+    const lines = await agent.handleUserInput("恢复任务");
+    const runtimeIdAfterResume = (agent as unknown as { runtime?: { runtimeId: string } })
+      .runtime?.runtimeId;
+
+    expect(runtimeIdBeforeResume).toBeDefined();
+    expect(runtimeIdAfterResume).toBe(runtimeIdBeforeResume);
+    expect(lines.join("\n")).not.toContain("Runtime 已重建");
+  });
+
+  it("disposes all role sessions when intake is disposed", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "aegisflow-agent-"));
+    tempDirs.push(root);
+    const projectDir = path.join(root, "project");
+    await mkdir(projectDir, { recursive: true });
+
+    const agent = new IntakeAgent(root);
+    await agent.handleUserInput("修复登录报错");
+    await agent.handleUserInput("y");
+    await agent.handleUserInput("y");
+    await agent.handleUserInput(projectDir);
+    await agent.handleUserInput("");
+
+    const runtime = (agent as unknown as {
+      runtime?: {
+        roleRegistry?: {
+          disposeAll?: () => Promise<void>;
+        };
+      };
+    }).runtime;
+    let disposeCalls = 0;
+
+    if (runtime?.roleRegistry) {
+      runtime.roleRegistry.disposeAll = async () => {
+        disposeCalls += 1;
+      };
+    }
+
+    await agent.dispose();
+
+    expect(disposeCalls).toBe(1);
+    expect((agent as unknown as { runtime?: unknown }).runtime).toBeUndefined();
+  });
+
+  it("marks running participate input as live passthrough candidate", () => {
+    const agent = new IntakeAgent("/tmp");
+    const mutableAgent = agent as unknown as {
+      runtime?: {
+        taskState: {
+          status: TaskStatus;
+        };
+      };
+    };
+
+    mutableAgent.runtime = {
+      taskState: {
+        status: TaskStatus.RUNNING,
+      },
+    };
+
+    expect(agent.shouldHandleInputAsLiveParticipation("补充一下这里的边界条件")).toBe(true);
+    expect(agent.shouldHandleInputAsLiveParticipation("继续执行")).toBe(false);
+    expect(agent.shouldHandleInputAsLiveParticipation("取消任务")).toBe(false);
+  });
+
+  it("does not dispatch resume_task when the task is already running", async () => {
+    const agent = new IntakeAgent("/tmp");
+    let dispatchedEvents = 0;
+    const mutableAgent = agent as unknown as {
+      runtime?: {
+        taskState: {
+          status: TaskStatus;
+        };
+        workflow: {
+          handleIntakeEvent: () => Promise<void>;
+        };
+      };
+    };
+
+    mutableAgent.runtime = {
+      taskState: {
+        status: TaskStatus.RUNNING,
+      },
+      workflow: {
+        async handleIntakeEvent() {
+          dispatchedEvents += 1;
+        },
+      },
+    };
+
+    const lines = await agent.handleUserInput("继续执行当前任务");
+
+    expect(lines).toEqual(["当前任务正在执行中，无需恢复。"]);
+    expect(dispatchedEvents).toBe(0);
+  });
+
   it("passes through role output without rewriting escape characters", () => {
     const rendered = formatWorkflowEventForCli({
       type: "role_output",

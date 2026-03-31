@@ -27,6 +27,7 @@
     "execa": "^9.0.0",
     "fs-extra": "^11.2.0",
     "langchain": "^0.3.0",
+    "node-pty": "^1.0.0",
     "ora": "^8.0.0",
     "picocolors": "^1.1.0",
     "pino": "^9.0.0",

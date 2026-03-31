@@ -170,6 +170,17 @@ export interface RoleVisibleOutput {
   kind?: "progress" | "summary" | "artifact" | "result";
 }
 
+export interface InputDeliveryResult {
+  accepted: boolean;
+  mode: "queued" | "rejected";
+  reason?:
+    | "empty_input"
+    | "no_active_role"
+    | "session_disposed"
+    | "session_unavailable"
+    | "executor_unavailable";
+}
+
 export interface ExecutionContext {
   taskId: string;
   phase: Phase;
@@ -209,6 +220,7 @@ export interface Role {
   placeholder: boolean;
   capabilityProfile: RoleCapabilityProfile;
   run(input: string, context: ExecutionContext): Promise<RoleResult>;
+  sendInput?(input: string): Promise<InputDeliveryResult>;
   dispose?(): Promise<void>;
 }
 
@@ -221,6 +233,10 @@ export interface RoleDefinition {
 export interface RoleRegistry {
   register(roleDef: RoleDefinition): void;
   get(name: RoleName): Role;
+  activate?(name: RoleName): Role;
+  getActive?(): Role | undefined;
+  getActiveRoleName?(): RoleName | undefined;
+  sendInputToActiveRole?(input: string): Promise<InputDeliveryResult>;
   list(): string[];
   disposeAll?(): Promise<void>;
 }

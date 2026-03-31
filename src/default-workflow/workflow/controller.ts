@@ -114,7 +114,9 @@ export class DefaultWorkflowController implements WorkflowController {
       phase?: Phase;
     },
   ): Promise<RoleResult> {
-    const role = this.dependencies.roleRegistry.get(roleName);
+    const role =
+      this.dependencies.roleRegistry.activate?.(roleName) ??
+      this.dependencies.roleRegistry.get(roleName);
     const phase = options?.phase ?? this.dependencies.taskState.currentPhase;
     // Workflow 只把最小执行上下文传给角色，
     // 不再把 TaskState、latestInput 或完整 ArtifactManager 暴露到 Role 层。
@@ -129,6 +131,13 @@ export class DefaultWorkflowController implements WorkflowController {
       roleCapabilityProfile: role.capabilityProfile,
       emitVisibleOutput: options?.workflowEvents
         ? async (output: RoleVisibleOutput) => {
+            const activeRoleName =
+              this.dependencies.roleRegistry.getActiveRoleName?.();
+
+            if (activeRoleName && activeRoleName !== roleName) {
+              return;
+            }
+
             if (output.message.length === 0) {
               return;
             }
@@ -190,6 +199,37 @@ export class DefaultWorkflowController implements WorkflowController {
       // 等待补充或已中断时，新的用户输入被视为恢复材料，
       // 直接走 resume 链路，保持入口统一。
       return this.resumeInternal(this.dependencies.taskState.taskId, message, true);
+    }
+
+    if (this.dependencies.taskState.status === TaskStatus.RUNNING) {
+      await this.saveLatestInput(message);
+      this.dependencies.taskState.updatedAt = timestamp;
+      const inputDelivery =
+        (await this.dependencies.roleRegistry.sendInputToActiveRole?.(message)) ?? {
+          accepted: false,
+          mode: "rejected" as const,
+          reason: "executor_unavailable" as const,
+        };
+
+      const workflowEvents: WorkflowEvent[] = [];
+      await this.pushEvent(
+        workflowEvents,
+        inputDelivery.accepted ? "progress" : "error",
+        inputDelivery.accepted
+          ? "已将输入加入当前 active role 的后续处理队列。"
+          : "当前 active role 暂未就绪，输入未透传，请稍后重试。",
+        {
+          latestInput: message,
+          activeRoleName: this.dependencies.roleRegistry.getActiveRoleName?.(),
+          inputDelivery,
+        },
+      );
+      await this.saveSnapshot(
+        inputDelivery.accepted
+          ? "task_participated_active_role"
+          : "task_participation_rejected",
+      );
+      return workflowEvents;
     }
 
     await this.saveLatestInput(message);
@@ -259,7 +299,6 @@ export class DefaultWorkflowController implements WorkflowController {
       status: TaskStatus.FAILED,
     });
     await this.saveSnapshot("task_cancelled");
-    await this.disposeRoleSessions();
     return workflowEvents;
   }
 
@@ -298,7 +337,6 @@ export class DefaultWorkflowController implements WorkflowController {
       status: TaskStatus.COMPLETED,
     });
     await this.saveSnapshot("task_completed");
-    await this.disposeRoleSessions();
   }
 
   private async resumeInternal(
@@ -350,7 +388,6 @@ export class DefaultWorkflowController implements WorkflowController {
           status: TaskStatus.COMPLETED,
         });
         await this.saveSnapshot("task_completed_after_final_approval");
-        await this.disposeRoleSessions();
         return workflowEvents;
       }
 
@@ -685,18 +722,7 @@ export class DefaultWorkflowController implements WorkflowController {
       status: TaskStatus.FAILED,
     });
     await this.saveSnapshot("task_failed");
-    await this.disposeRoleSessions();
     return workflowEvents;
-  }
-
-  private async disposeRoleSessions(): Promise<void> {
-    try {
-      // 角色执行器可能维护长期 CLI session；
-      // 任务进入终态后要在 Runtime 边界统一回收，避免后续错误复用旧 session。
-      await this.dependencies.roleRegistry.disposeAll?.();
-    } catch {
-      // 这里以任务终态落盘为最高优先级，清理异常不再回滚任务状态。
-    }
   }
 
   private getCurrentPhaseConfigSafe(): WorkflowPhaseConfig | null {

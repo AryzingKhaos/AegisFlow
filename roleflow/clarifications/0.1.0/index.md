@@ -16,4 +16,5 @@
 | `default-workflow-role-codex-agent` | [default-workflow-role-codex-agent-prd.md](default-workflow-role-codex-agent-prd.md) | `default-workflow` 的角色 Codex Agent 运行需求文档 |
 | `default-workflow-role-codex-cli` | [default-workflow-role-codex-cli-prd.md](default-workflow-role-codex-cli-prd.md) | `default-workflow` 的角色 Codex CLI 执行需求文档 |
 | `default-workflow-role-codex-cli-output-passthrough` | [default-workflow-role-codex-cli-output-passthrough-prd.md](default-workflow-role-codex-cli-output-passthrough-prd.md) | `default-workflow` 的 Codex CLI 角色输出原样透传需求文档 |
+| `default-workflow-role-node-pty-subcommand` | [default-workflow-role-node-pty-subcommand-prd.md](default-workflow-role-node-pty-subcommand-prd.md) | `default-workflow` 的 role 子命令行与 active role 架构需求文档 |
 | `default-workflow-role-prompt-bootstrap` | [default-workflow-role-prompt-bootstrap-prd.md](default-workflow-role-prompt-bootstrap-prd.md) | `default-workflow` 的角色原型与项目侧提示词装载需求文档 |

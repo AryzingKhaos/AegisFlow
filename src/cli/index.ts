@@ -10,7 +10,9 @@ async function main(): Promise<void> {
 
   let isClosed = false;
   let isBusy = false;
+  let isDisposing = false;
   let pendingWork = Promise.resolve();
+  let pendingLiveInput = Promise.resolve();
   const stdoutWriter = process.stdout as {
     write: (chunk: string) => unknown;
   };
@@ -59,7 +61,32 @@ async function main(): Promise<void> {
       });
   };
 
+  const enqueueLiveInput = (work: () => Promise<void>): void => {
+    pendingLiveInput = pendingLiveInput
+      .then(work)
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error(`CLI 实时透传失败：${message}`);
+      });
+  };
+
+  const disposeAgent = async (): Promise<void> => {
+    if (isDisposing) {
+      return;
+    }
+
+    isDisposing = true;
+    await agent.dispose();
+  };
+
   rl.on("line", (line) => {
+    if (agent.shouldHandleInputAsLiveParticipation(line)) {
+      enqueueLiveInput(async () => {
+        printLines(await agent.handleUserInput(line));
+      });
+      return;
+    }
+
     enqueue(async () => {
       printLines(await agent.handleUserInput(line));
     });
@@ -71,6 +98,7 @@ async function main(): Promise<void> {
       printLines(result.lines);
 
       if (result.shouldExit) {
+        await disposeAgent();
         isClosed = true;
         rl.close();
       }
@@ -79,6 +107,7 @@ async function main(): Promise<void> {
 
   rl.on("close", () => {
     isClosed = true;
+    void disposeAgent();
   });
 }
 
