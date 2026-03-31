@@ -91,6 +91,13 @@ workflow:
 roles:
   prototypeDir: "/Users/aaron/code/roleflow/roles"
   promptDir: ".aegisflow/roles"
+  executor:
+    type: "codex-cli"
+    command: "codex"
+    cwd: "."
+    timeoutMs: 300000
+    env:
+      passthrough: true
 
 artifacts:
   structure: "by-phase"
@@ -199,6 +206,13 @@ workflow:
 roles:
   prototypeDir: "/Users/aaron/code/roleflow/roles"
   promptDir: ".aegisflow/roles"
+  executor:
+    type: "codex-cli"
+    command: "codex"
+    cwd: "."
+    timeoutMs: 300000
+    env:
+      passthrough: true
 ```
 
 这是当前 README 最重要的配置块。
@@ -233,6 +247,32 @@ prototypeDir: "/Users/aaron/code/roleflow/roles"
 - `.aegisflow/roles/critic.md`
 - `.aegisflow/roles/tester.md`
 
+#### `executor`
+
+- 角色执行器配置
+- 当前新增约束下，`default-workflow` 的角色执行通过 `codex` CLI 完成
+- 这里描述的是执行介质，不改变 `Workflow` 通过 `RoleResult` 消费最终结果的公共语义
+
+推荐写法：
+
+```yaml
+executor:
+  type: "codex-cli"
+  command: "codex"
+  cwd: "."
+  timeoutMs: 300000
+  env:
+    passthrough: true
+```
+
+字段说明：
+
+- `type`：当前固定为 `codex-cli`
+- `command`：要启动的 CLI 命令
+- `cwd`：角色 CLI 的工作目录
+- `timeoutMs`：单次角色执行超时
+- `env.passthrough`：是否透传当前环境变量；当前按 PRD 语义固定为透传
+
 #### 角色提示词装载规则
 
 当前 PRD 约束下，角色 prompt 组装遵循下面的顺序：
@@ -258,6 +298,13 @@ prototypeDir: "/Users/aaron/code/roleflow/roles"
 roles:
   prototypeDir: "/Users/aaron/code/roleflow/roles"
   promptDir: ".aegisflow/roles"
+  executor:
+    type: "codex-cli"
+    command: "codex"
+    cwd: "."
+    timeoutMs: 300000
+    env:
+      passthrough: true
   overrides:
     critic:
       extraInstructions: ".aegisflow/roles/custom-critic.md"
@@ -324,6 +371,7 @@ flowchart LR
     PATHS[paths]
     WF[workflow]
     ROLES[roles]
+    EXEC[Role Executor]
     RT[Runtime]
     IA[Intake]
     WC[WorkflowController]
@@ -334,6 +382,7 @@ flowchart LR
     CFG --> PATHS
     CFG --> WF
     CFG --> ROLES
+    ROLES --> EXEC
     PATHS --> RT
     WF --> WC
     ROLES --> RR
@@ -386,3 +435,4 @@ flowchart LR
 - [default-workflow-role-layer-prd.md](/Users/aaron/code/Aegisflow/roleflow/clarifications/0.1.0/default-workflow-role-layer-prd.md)
 - [default-workflow-role-prompt-bootstrap-prd.md](/Users/aaron/code/Aegisflow/roleflow/clarifications/0.1.0/default-workflow-role-prompt-bootstrap-prd.md)
 - [default-workflow-role-codex-agent-prd.md](/Users/aaron/code/Aegisflow/roleflow/clarifications/0.1.0/default-workflow-role-codex-agent-prd.md)
+- [default-workflow-role-codex-cli-prd.md](/Users/aaron/code/Aegisflow/roleflow/clarifications/0.1.0/default-workflow-role-codex-cli-prd.md)
