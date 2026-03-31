@@ -22,4 +22,5 @@
 | `0.1.0` | `default-workflow-cli-streaming-output` | [0.1.0/default-workflow-cli-streaming-output-prd.md](0.1.0/default-workflow-cli-streaming-output-prd.md) |
 | `0.1.0` | `default-workflow-role-codex-agent` | [0.1.0/default-workflow-role-codex-agent-prd.md](0.1.0/default-workflow-role-codex-agent-prd.md) |
 | `0.1.0` | `default-workflow-role-codex-cli` | [0.1.0/default-workflow-role-codex-cli-prd.md](0.1.0/default-workflow-role-codex-cli-prd.md) |
+| `0.1.0` | `default-workflow-role-codex-cli-output-passthrough` | [0.1.0/default-workflow-role-codex-cli-output-passthrough-prd.md](0.1.0/default-workflow-role-codex-cli-output-passthrough-prd.md) |
 | `0.1.0` | `default-workflow-role-prompt-bootstrap` | [0.1.0/default-workflow-role-prompt-bootstrap-prd.md](0.1.0/default-workflow-role-prompt-bootstrap-prd.md) |
