@@ -31,6 +31,7 @@ interface CodexCliExecutorDependencies {
       cwd: string;
       input: string;
       env: Record<string, string | undefined>;
+      onStdoutLine?: (line: string) => void;
     },
   ) => Promise<unknown>;
 }
@@ -46,16 +47,18 @@ export class CodexCliRoleAgentExecutor implements RoleAgentExecutor {
     // 角色执行结果先落到项目内缓存文件，再回读成字符串，
     // 这样可以避免把终端事件流当成最终结构化输出来源。
     const outputPath = buildRoleAgentOutputPath(input);
+    let pendingVisibleOutput = Promise.resolve();
 
     await fs.mkdir(path.dirname(outputPath), { recursive: true });
 
     try {
       // 角色执行器统一通过 codex exec 发起请求，
       // 明确与通用聊天接口分离，避免默认角色再次退化成直接 llm.invoke(prompt)。
-      await (this.dependencies.runCommand ?? execa)(
+      await (this.dependencies.runCommand ?? runStreamingCodexCommand)(
         "codex",
         [
           "exec",
+          "--json",
           "--full-auto",
           "--skip-git-repo-check",
           "--sandbox",
@@ -82,8 +85,21 @@ export class CodexCliRoleAgentExecutor implements RoleAgentExecutor {
             OPENAI_API_KEY: input.config.apiKey,
             OPENAI_BASE_URL: input.config.baseUrl,
           },
+          onStdoutLine: (line: string) => {
+            const visibleMessages = extractVisibleMessagesFromCodexEventLine(line);
+
+            for (const message of visibleMessages) {
+              pendingVisibleOutput = pendingVisibleOutput.then(async () => {
+                await input.context.emitVisibleOutput?.({
+                  message,
+                  kind: "progress",
+                });
+              });
+            }
+          },
         },
       );
+      await pendingVisibleOutput;
 
       return await fs.readFile(outputPath, "utf8");
     } catch (error) {
@@ -92,6 +108,47 @@ export class CodexCliRoleAgentExecutor implements RoleAgentExecutor {
 
       throw new Error(`Role Codex agent execution failed: ${message}`);
     }
+  }
+}
+
+export async function runStreamingCodexCommand(
+  file: string,
+  args: string[],
+  options: {
+    cwd: string;
+    input: string;
+    env: Record<string, string | undefined>;
+    onStdoutLine?: (line: string) => void;
+  },
+): Promise<void> {
+  const subprocess = execa(file, args, {
+    cwd: options.cwd,
+    input: options.input,
+    env: options.env,
+  });
+  const stdoutStream = (
+    subprocess as unknown as {
+      stdout?: {
+        on: (
+          event: string,
+          listener: (chunk: unknown) => void,
+        ) => void;
+      };
+    }
+  ).stdout;
+  let stdoutBuffer = "";
+
+  stdoutStream?.on("data", (chunk: unknown) => {
+    stdoutBuffer += normalizeProcessChunk(chunk);
+    stdoutBuffer = flushStdoutLines(stdoutBuffer, options.onStdoutLine);
+  });
+
+  await subprocess;
+
+  const trailingLine = stdoutBuffer.trim();
+
+  if (trailingLine) {
+    options.onStdoutLine?.(trailingLine);
   }
 }
 
@@ -120,4 +177,142 @@ export function buildRoleAgentOutputPath(
 
 function sanitizeCacheSegment(value: string): string {
   return value.replace(/[^a-zA-Z0-9_-]/g, "_");
+}
+
+function flushStdoutLines(
+  buffer: string,
+  onStdoutLine?: (line: string) => void,
+): string {
+  let cursor = buffer.indexOf("\n");
+  let remaining = buffer;
+
+  while (cursor >= 0) {
+    const line = remaining.slice(0, cursor).trim();
+
+    if (line) {
+      onStdoutLine?.(line);
+    }
+
+    remaining = remaining.slice(cursor + 1);
+    cursor = remaining.indexOf("\n");
+  }
+
+  return remaining;
+}
+
+function normalizeProcessChunk(chunk: unknown): string {
+  if (typeof chunk === "string") {
+    return chunk;
+  }
+
+  if (chunk && typeof chunk === "object" && "toString" in chunk) {
+    return String((chunk as { toString: () => string }).toString());
+  }
+
+  return String(chunk ?? "");
+}
+
+function extractVisibleMessagesFromCodexEventLine(line: string): string[] {
+  const trimmedLine = line.trim();
+
+  if (!trimmedLine) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(trimmedLine) as Record<string, unknown>;
+
+    return collectVisibleMessages(parsed).filter((message) => message.trim().length > 0);
+  } catch {
+    return shouldSuppressPlainStdoutLine(trimmedLine) ? [] : [trimmedLine];
+  }
+}
+
+function collectVisibleMessages(payload: Record<string, unknown>): string[] {
+  const eventType = typeof payload.type === "string" ? payload.type : "";
+  const messages: string[] = [];
+
+  pushIfPresent(messages, payload.message);
+  pushIfPresent(messages, payload.delta);
+  pushIfPresent(messages, payload.text);
+  pushIfPresent(messages, payload.output_text);
+
+  collectNestedText(messages, payload.content);
+  collectNestedText(messages, payload.item);
+  collectNestedText(messages, payload.response);
+
+  if (messages.length > 0) {
+    return messages;
+  }
+
+  return shouldSuppressJsonEvent(eventType) ? [] : [];
+}
+
+function collectNestedText(target: string[], value: unknown): void {
+  if (typeof value === "string") {
+    pushIfPresent(target, value);
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectNestedText(target, item);
+    }
+
+    return;
+  }
+
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    pushIfPresent(target, record.message);
+    pushIfPresent(target, record.delta);
+    pushIfPresent(target, record.text);
+    pushIfPresent(target, record.output_text);
+
+    for (const nestedValue of Object.values(record)) {
+      if (nestedValue !== value) {
+        collectNestedText(target, nestedValue);
+      }
+    }
+  }
+}
+
+function pushIfPresent(target: string[], value: unknown): void {
+  if (typeof value !== "string") {
+    return;
+  }
+
+  const normalized = normalizeVisibleText(value);
+
+  if (!normalized || shouldSuppressPlainStdoutLine(normalized)) {
+    return;
+  }
+
+  target.push(normalized);
+}
+
+function shouldSuppressJsonEvent(eventType: string): boolean {
+  return (
+    eventType === "thread.started" ||
+    eventType === "thread.completed" ||
+    eventType === "turn.started" ||
+    eventType === "turn.completed"
+  );
+}
+
+function shouldSuppressPlainStdoutLine(line: string): boolean {
+  return (
+    line.startsWith("WARNING: proceeding") ||
+    line.startsWith("note: run with") ||
+    line.startsWith("thread '") ||
+    line.startsWith("Could not create otel exporter") ||
+    /^\d{4}-\d{2}-\d{2}T/.test(line)
+  );
+}
+
+function normalizeVisibleText(value: string): string {
+  return value
+    .replace(/\r\n/g, "\n")
+    .replace(/\\n/g, "\n")
+    .trim();
 }

@@ -275,6 +275,7 @@ describe("role layer", () => {
 
   it("executes role output through the agent pipeline instead of local placeholder text", async () => {
     let observedPrompt = "";
+    const visibleOutputs: string[] = [];
     const projectConfig = createProjectConfig({
       projectDir: "/tmp/project",
       artifactDir: "/tmp/project/.aegisflow/artifacts",
@@ -337,6 +338,9 @@ describe("role layer", () => {
         cwd: "/tmp/project",
         projectConfig,
         roleCapabilityProfile: executionProfile,
+        async emitVisibleOutput(output) {
+          visibleOutputs.push(output.message);
+        },
         artifacts: {
           async get() {
             return undefined;
@@ -357,6 +361,10 @@ describe("role layer", () => {
     expect(result.metadata?.agentModel).toBe("codex-5.4");
     expect(observedPrompt).toContain("SYSTEM_PROMPT");
     expect(observedPrompt).toContain("design_plan");
+    expect(visibleOutputs).toEqual([
+      "角色 planner 已开始执行，当前阶段：plan。",
+      "planner 已通过 agent 输出计划",
+    ]);
   });
 
   it("executes codex cli with isolated output files and returns the written content", async () => {
@@ -445,6 +453,85 @@ describe("role layer", () => {
     expect(new Set(observedOutputPaths).size).toBe(2);
     expect(observedOutputPaths.every((filePath) => filePath.includes("/.aegisflow/runtime-cache/"))).toBe(true);
     expect(observedSandboxes).toEqual(["workspace-write", "workspace-write"]);
+  });
+
+  it("streams visible codex event content during real executor execution", async () => {
+    const root = await createTempProject();
+    const projectDir = path.join(root, "project");
+    await mkdir(projectDir, { recursive: true });
+
+    const visibleOutputs: string[] = [];
+    const executor = new CodexCliRoleAgentExecutor({
+      async runCommand(_file, args, options) {
+        options.onStdoutLine?.('{"type":"thread.started","thread_id":"demo"}');
+        options.onStdoutLine?.('{"type":"response.output_text.delta","delta":"正在分析代码依赖"}');
+        options.onStdoutLine?.('{"type":"response.output_text.delta","delta":"\\\\n准备修改方案"}');
+
+        const outputPath = args[args.indexOf("--output-last-message") + 1];
+        await writeFile(
+          outputPath,
+          JSON.stringify({
+            summary: "builder 完成",
+            artifacts: [],
+          }),
+          "utf8",
+        );
+      },
+    });
+
+    const result = await executeRoleAgent({
+      bootstrap: {
+        executor,
+        prompt: "SYSTEM_PROMPT",
+        promptSources: ["builtin/builder.md"],
+        promptWarnings: [],
+        config: {
+          model: "codex-5.4",
+          baseUrl: "https://api.openai.com/v1",
+          apiKey: "dummy",
+          executionMode: "agent",
+          sources: {
+            model: "default",
+            baseUrl: "default",
+            apiKey: "OPENAI_API_KEY",
+            executionMode: "default",
+          },
+        },
+      },
+      roleName: "builder",
+      executionProfile: createCapabilityProfile("builder"),
+      context: {
+        taskId: "task_streaming_real_executor",
+        phase: "build",
+        cwd: projectDir,
+        projectConfig: createProjectConfig({
+          projectDir,
+          artifactDir: path.join(root, "artifacts"),
+          workflow: createWorkflowSelection("bugfix"),
+        }),
+        roleCapabilityProfile: createCapabilityProfile("builder"),
+        async emitVisibleOutput(output) {
+          visibleOutputs.push(output.message);
+        },
+        artifacts: {
+          async get() {
+            return undefined;
+          },
+          async list() {
+            return [];
+          },
+        },
+      },
+      input: "实现登录修复",
+    });
+
+    expect(result.summary).toBe("builder 完成");
+    expect(visibleOutputs).toEqual([
+      "角色 builder 已开始执行，当前阶段：build。",
+      "正在分析代码依赖",
+      "准备修改方案",
+      "builder 完成",
+    ]);
   });
 
   it("wraps codex cli execution failures with role executor context", async () => {
