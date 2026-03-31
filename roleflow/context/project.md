@@ -141,10 +141,10 @@ flowchart LR
 
    U --> L1
    L1 -->|IntakeEvent| L2
-   L2 -->|WorkflowEvent| L1
+   L2 -->|WorkflowEvent / role_output| L1
    L2 -->|直接调用| L3
 
-   L3 -->|角色执行结果| L2
+   L3 -->|角色执行结果 / 增量可见输出| L2
    L2 -->|artifact工件| F
 
    L2 -->|用户需求| L3
@@ -204,6 +204,11 @@ sequenceDiagram
   end
   RR-->>WF: role
   WF->>R: run(input, ExecutionContext)
+  loop 角色持续执行
+    R-->>WF: 用户可见增量输出
+    WF-->>IA: WorkflowEvent(role_output)
+    IA-->>U: 格式化后实时展示
+  end
   R-->>WF: RoleResult
   WF->>AM: 保存 artifact
 
@@ -211,6 +216,11 @@ sequenceDiagram
   WF->>RR: get(explorer)
   RR-->>WF: role
   WF->>R: run(input, ExecutionContext)
+  loop 角色持续执行
+    R-->>WF: 用户可见增量输出
+    WF-->>IA: WorkflowEvent(role_output)
+    IA-->>U: 格式化后实时展示
+  end
   R-->>WF: RoleResult
   WF->>AM: 保存 artifact
 
@@ -218,6 +228,11 @@ sequenceDiagram
   WF->>RR: get(planner)
   RR-->>WF: role
   WF->>R: run(input, ExecutionContext)
+  loop 角色持续执行
+    R-->>WF: 用户可见增量输出
+    WF-->>IA: WorkflowEvent(role_output)
+    IA-->>U: 格式化后实时展示
+  end
   R-->>WF: RoleResult
   WF->>AM: 保存 artifact
 
@@ -232,6 +247,11 @@ sequenceDiagram
   WF->>RR: get(planner)
   RR-->>WF: role
   WF->>R: run(input, ExecutionContext)
+  loop 角色持续执行
+    R-->>WF: 用户可见增量输出
+    WF-->>IA: WorkflowEvent(role_output)
+    IA-->>U: 格式化后实时展示
+  end
   R-->>WF: RoleResult
   WF->>AM: 保存 artifact
 
@@ -239,6 +259,11 @@ sequenceDiagram
   WF->>RR: get(builder)
   RR-->>WF: role
   WF->>R: run(input, ExecutionContext)
+  loop 角色持续执行
+    R-->>WF: 用户可见增量输出
+    WF-->>IA: WorkflowEvent(role_output)
+    IA-->>U: 格式化后实时展示
+  end
   R->>CODE: 修改代码
   R-->>WF: RoleResult
   WF->>AM: 保存 artifact
@@ -247,6 +272,11 @@ sequenceDiagram
   WF->>RR: get(critic)
   RR-->>WF: role
   WF->>R: run(input, ExecutionContext)
+  loop 角色持续执行
+    R-->>WF: 用户可见增量输出
+    WF-->>IA: WorkflowEvent(role_output)
+    IA-->>U: 格式化后实时展示
+  end
   R-->>WF: RoleResult
   WF->>AM: 保存 artifact
 
@@ -254,6 +284,11 @@ sequenceDiagram
   WF->>RR: get(test-designer)
   RR-->>WF: role
   WF->>R: run(input, ExecutionContext)
+  loop 角色持续执行
+    R-->>WF: 用户可见增量输出
+    WF-->>IA: WorkflowEvent(role_output)
+    IA-->>U: 格式化后实时展示
+  end
   R-->>WF: RoleResult
   WF->>AM: 保存 artifact
 
@@ -261,6 +296,11 @@ sequenceDiagram
   WF->>RR: get(tester)
   RR-->>WF: role
   WF->>R: run(input, ExecutionContext)
+  loop 角色持续执行
+    R-->>WF: 用户可见增量输出
+    WF-->>IA: WorkflowEvent(role_output)
+    IA-->>U: 格式化后实时展示
+  end
   R-->>WF: RoleResult
   WF->>AM: 保存 artifact
 
@@ -268,6 +308,11 @@ sequenceDiagram
   WF->>RR: get(test-writer)
   RR-->>WF: role
   WF->>R: run(input, ExecutionContext)
+  loop 角色持续执行
+    R-->>WF: 用户可见增量输出
+    WF-->>IA: WorkflowEvent(role_output)
+    IA-->>U: 格式化后实时展示
+  end
   R->>CODE: 添加/修改单元测试
   R-->>WF: RoleResult
   WF->>AM: 保存 artifact
@@ -410,7 +455,8 @@ Intake本身是一个Agent，所以对象应该叫 IntakeAgent？
 	 - 继续未完成的任务
 	 - 对任务的内容进行补充
  - 负责跟用户沟通，将用户的需求规范化传给workflow
- - 接收workflow层的消息，展示到CLI上
+ - 接收workflow层的消息，实时展示到CLI上
+ - 对展示到 CLI 的文本做基础排版，至少支持换行、段落、列表和代码块边界
  - 初始化Runtime对象
  - 给 workflow 发送 IntakeEvent，接收 workflow 的 WorkflowEvent
 
@@ -445,7 +491,8 @@ type IntakeEvent = {
  - 不是Agent。
  - 唯一的 Runtime.TaskState 的合法修改者，并保存 TaskState 的快照到md文件里，保证进程被打断的时候，下一次启动可以直接继续上一次的任务
  - 接收 intake 层的指令。准确地说，是接收 TaskStatus 变更的指令，然后将 intake 层的用户要求透传给 role 层的具体 agent。
- - 接收 role 层返回的内容，调用 ArtifactManager ，写工件
+ - 接收 role 层返回的最终结果，调用 ArtifactManager ，写工件
+ - 在角色执行过程中，承担 Role 用户可见增量输出到 Intake 的统一转发职责
  - 写 EventLogger 日志
  - 更新 TaskStatus 状态
  - 从 intake 层接受 IntakeEvent，给 intake 层发送 WorkflowEvent
@@ -468,6 +515,7 @@ type WorkflowEventType =
   | "phase_end"
   | "role_start"
   | "role_end"
+  | "role_output"
   | "artifact_created"
   | "progress"
   | "error"
@@ -475,12 +523,13 @@ type WorkflowEventType =
 type WorkflowEvent = {
   type: WorkflowEventType
   taskId: string
-  message: string
+  message: string // 对于 role_output / progress 等展示型事件，允许携带多行用户可见文本
   timestamp: number
   metadata?: {
     phase?: string
     role?: string
     artifactPath?: string
+    outputKind?: "status" | "role_output" | "summary"
   }
 }
 
@@ -509,7 +558,8 @@ type LogEvent = {
  - 都是agent
  - 接受workflow层的指令，执行任务。
  - 副作用，比如修改代码、修改单测
- - 返回执行任务的结果，但不包含写工件的工作
+ - 执行过程中可以产生用户可见的增量输出，但不能直接写 CLI，必须通过 Workflow 转发
+ - 返回执行任务的最终结果，但不包含写工件的工作
 
 
 ## 7.配置文件示例
