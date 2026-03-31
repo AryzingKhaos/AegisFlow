@@ -212,7 +212,7 @@ sequenceDiagram
   loop 角色持续执行
     R-->>WF: 用户可见增量输出
     WF-->>IA: WorkflowEvent(role_output)
-    IA-->>U: 格式化后实时展示
+    IA-->>U: 原样实时展示
   end
   R-->>WF: RoleResult
   WF->>AM: 保存 artifact
@@ -224,7 +224,7 @@ sequenceDiagram
   loop 角色持续执行
     R-->>WF: 用户可见增量输出
     WF-->>IA: WorkflowEvent(role_output)
-    IA-->>U: 格式化后实时展示
+    IA-->>U: 原样实时展示
   end
   R-->>WF: RoleResult
   WF->>AM: 保存 artifact
@@ -236,7 +236,7 @@ sequenceDiagram
   loop 角色持续执行
     R-->>WF: 用户可见增量输出
     WF-->>IA: WorkflowEvent(role_output)
-    IA-->>U: 格式化后实时展示
+    IA-->>U: 原样实时展示
   end
   R-->>WF: RoleResult
   WF->>AM: 保存 artifact
@@ -255,7 +255,7 @@ sequenceDiagram
   loop 角色持续执行
     R-->>WF: 用户可见增量输出
     WF-->>IA: WorkflowEvent(role_output)
-    IA-->>U: 格式化后实时展示
+    IA-->>U: 原样实时展示
   end
   R-->>WF: RoleResult
   WF->>AM: 保存 artifact
@@ -267,7 +267,7 @@ sequenceDiagram
   loop 角色持续执行
     R-->>WF: 用户可见增量输出
     WF-->>IA: WorkflowEvent(role_output)
-    IA-->>U: 格式化后实时展示
+    IA-->>U: 原样实时展示
   end
   R->>CODE: 修改代码
   R-->>WF: RoleResult
@@ -280,7 +280,7 @@ sequenceDiagram
   loop 角色持续执行
     R-->>WF: 用户可见增量输出
     WF-->>IA: WorkflowEvent(role_output)
-    IA-->>U: 格式化后实时展示
+    IA-->>U: 原样实时展示
   end
   R-->>WF: RoleResult
   WF->>AM: 保存 artifact
@@ -292,7 +292,7 @@ sequenceDiagram
   loop 角色持续执行
     R-->>WF: 用户可见增量输出
     WF-->>IA: WorkflowEvent(role_output)
-    IA-->>U: 格式化后实时展示
+    IA-->>U: 原样实时展示
   end
   R-->>WF: RoleResult
   WF->>AM: 保存 artifact
@@ -304,7 +304,7 @@ sequenceDiagram
   loop 角色持续执行
     R-->>WF: 用户可见增量输出
     WF-->>IA: WorkflowEvent(role_output)
-    IA-->>U: 格式化后实时展示
+    IA-->>U: 原样实时展示
   end
   R-->>WF: RoleResult
   WF->>AM: 保存 artifact
@@ -316,7 +316,7 @@ sequenceDiagram
   loop 角色持续执行
     R-->>WF: 用户可见增量输出
     WF-->>IA: WorkflowEvent(role_output)
-    IA-->>U: 格式化后实时展示
+    IA-->>U: 原样实时展示
   end
   R->>CODE: 添加/修改单元测试
   R-->>WF: RoleResult

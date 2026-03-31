@@ -129,16 +129,14 @@ export class DefaultWorkflowController implements WorkflowController {
       roleCapabilityProfile: role.capabilityProfile,
       emitVisibleOutput: options?.workflowEvents
         ? async (output: RoleVisibleOutput) => {
-            const visibleMessage = output.message.trim();
-
-            if (!visibleMessage) {
+            if (output.message.length === 0) {
               return;
             }
 
             await this.pushEvent(
               options.workflowEvents ?? [],
               "role_output",
-              visibleMessage,
+              output.message,
               {
                 phase,
                 roleName,

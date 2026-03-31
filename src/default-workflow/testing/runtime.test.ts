@@ -431,7 +431,7 @@ describe("workflow runtime", () => {
       roleRegistry: new TestRoleRegistry({
         planner: createRole("planner", async (_input, context) => {
           await context.emitVisibleOutput?.({
-            message: "第一段分析\\n第二段分析",
+            message: "\n第一段分析\n第二段分析\n",
             kind: "progress",
           });
           await context.emitVisibleOutput?.({
@@ -456,7 +456,7 @@ describe("workflow runtime", () => {
     expect(firstRoleOutputIndex).toBeLessThan(roleEndIndex);
     expect(
       events.filter((event) => event.type === "role_output").map((event) => event.message),
-    ).toEqual(["第一段分析\\n第二段分析", "最终结论：进入实现阶段"]);
+    ).toEqual(["\n第一段分析\n第二段分析\n", "最终结论：进入实现阶段"]);
   });
 
   it("waits for user input on paused phases and resumes from the same phase", async () => {

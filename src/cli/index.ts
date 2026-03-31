@@ -1,5 +1,6 @@
 import readline from "node:readline";
 import { IntakeAgent } from "../default-workflow";
+import { writeCliLine } from "./output";
 
 async function main(): Promise<void> {
   const rl = readline.createInterface({
@@ -10,6 +11,9 @@ async function main(): Promise<void> {
   let isClosed = false;
   let isBusy = false;
   let pendingWork = Promise.resolve();
+  const stdoutWriter = process.stdout as {
+    write: (chunk: string) => unknown;
+  };
 
   const printLines = (lines: string[]): void => {
     if (lines.length === 0) {
@@ -17,7 +21,7 @@ async function main(): Promise<void> {
     }
 
     for (const line of lines) {
-      console.log(line);
+      writeCliLine(stdoutWriter, line);
     }
 
     if (!isClosed && !isBusy) {

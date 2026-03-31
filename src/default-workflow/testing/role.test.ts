@@ -470,7 +470,7 @@ describe("role layer", () => {
       async runCommand(_file, args, options) {
         options.onStdoutLine?.('{"type":"thread.started","thread_id":"demo"}');
         options.onStdoutLine?.('{"type":"response.output_text.delta","delta":"正在分析代码依赖"}');
-        options.onStdoutLine?.('{"type":"response.output_text.delta","delta":"\\\\n准备修改方案"}');
+        options.onStdoutLine?.('{"type":"response.output_text.delta","delta":"\\n准备修改方案"}');
 
         const outputPath = args[args.indexOf("--output-last-message") + 1];
         await writeFile(
@@ -534,9 +534,82 @@ describe("role layer", () => {
     expect(visibleOutputs).toEqual([
       "角色 builder 已开始执行，当前阶段：build。",
       "正在分析代码依赖",
-      "准备修改方案",
+      "\n准备修改方案",
       "builder 完成",
     ]);
+  });
+
+  it("keeps codex cli visible output whitespace exactly as received", async () => {
+    const root = await createTempProject();
+    const projectDir = path.join(root, "project");
+    await mkdir(projectDir, { recursive: true });
+
+    const visibleOutputs: string[] = [];
+    const executor = new CodexCliRoleAgentExecutor({
+      async runCommand(_file, args, options) {
+        options.onStdoutLine?.(
+          '{"type":"response.output_text.delta","delta":"\\n```ts\\nconst value = 1;\\n```\\n"}',
+        );
+
+        const outputPath = args[args.indexOf("--output-last-message") + 1];
+        await writeFile(
+          outputPath,
+          JSON.stringify({
+            summary: "builder 完成",
+            artifacts: [],
+          }),
+          "utf8",
+        );
+      },
+    });
+
+    await executeRoleAgent({
+      bootstrap: {
+        executor,
+        prompt: "SYSTEM_PROMPT",
+        promptSources: ["builtin/builder.md"],
+        promptWarnings: [],
+        config: {
+          model: "codex-5.4",
+          baseUrl: "https://api.openai.com/v1",
+          apiKey: "dummy",
+          executionMode: "agent",
+          sources: {
+            model: "default",
+            baseUrl: "default",
+            apiKey: "OPENAI_API_KEY",
+            executionMode: "default",
+          },
+        },
+      },
+      roleName: "builder",
+      executionProfile: createCapabilityProfile("builder"),
+      context: {
+        taskId: "task_streaming_whitespace",
+        phase: "build",
+        cwd: projectDir,
+        projectConfig: createProjectConfig({
+          projectDir,
+          artifactDir: path.join(root, "artifacts"),
+          workflow: createWorkflowSelection("bugfix"),
+        }),
+        roleCapabilityProfile: createCapabilityProfile("builder"),
+        async emitVisibleOutput(output) {
+          visibleOutputs.push(output.message);
+        },
+        artifacts: {
+          async get() {
+            return undefined;
+          },
+          async list() {
+            return [];
+          },
+        },
+      },
+      input: "实现登录修复",
+    });
+
+    expect(visibleOutputs).toContain("\n```ts\nconst value = 1;\n```\n");
   });
 
   it("wraps codex cli execution failures with role executor context", async () => {

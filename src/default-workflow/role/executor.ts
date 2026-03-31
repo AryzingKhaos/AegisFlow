@@ -142,10 +142,8 @@ export async function runStreamingCodexCommand(
 
   await subprocess;
 
-  const trailingLine = stdoutBuffer.trim();
-
-  if (trailingLine) {
-    options.onStdoutLine?.(trailingLine);
+  if (stdoutBuffer.length > 0) {
+    options.onStdoutLine?.(stdoutBuffer);
   }
 }
 
@@ -184,11 +182,8 @@ function flushStdoutLines(
   let remaining = buffer;
 
   while (cursor >= 0) {
-    const line = remaining.slice(0, cursor).trim();
-
-    if (line) {
-      onStdoutLine?.(line);
-    }
+    const line = remaining.slice(0, cursor);
+    onStdoutLine?.(line);
 
     remaining = remaining.slice(cursor + 1);
     cursor = remaining.indexOf("\n");
@@ -265,16 +260,16 @@ function buildExecutorEnv(
 function extractVisibleMessagesFromCodexEventLine(line: string): string[] {
   const trimmedLine = line.trim();
 
-  if (!trimmedLine) {
+  if (line.length === 0) {
     return [];
   }
 
   try {
     const parsed = JSON.parse(trimmedLine) as Record<string, unknown>;
 
-    return collectVisibleMessages(parsed).filter((message) => message.trim().length > 0);
+    return collectVisibleMessages(parsed).filter((message) => message.length > 0);
   } catch {
-    return shouldSuppressPlainStdoutLine(trimmedLine) ? [] : [trimmedLine];
+    return shouldSuppressPlainStdoutLine(trimmedLine) ? [] : [line];
   }
 }
 
@@ -358,7 +353,14 @@ function pushIfPresent(target: string[], value: unknown): void {
 
   const normalized = normalizeVisibleText(value);
 
-  if (!normalized || shouldSuppressPlainStdoutLine(normalized)) {
+  if (normalized.length === 0) {
+    return;
+  }
+
+  if (
+    normalized.trim().length > 0 &&
+    shouldSuppressPlainStdoutLine(normalized.trim())
+  ) {
     return;
   }
 
@@ -385,8 +387,7 @@ function shouldSuppressPlainStdoutLine(line: string): boolean {
 }
 
 function normalizeVisibleText(value: string): string {
-  return value
-    .replace(/\r\n/g, "\n")
-    .replace(/\\n/g, "\n")
-    .trim();
+  // Codex CLI 已经给出了可直接展示的文本片段，
+  // 这里不再做 trim、换行修复或空白折叠，避免破坏原始格式边界。
+  return value;
 }

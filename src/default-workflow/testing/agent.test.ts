@@ -78,10 +78,10 @@ describe("IntakeAgent", () => {
     expect(rendered).toContain("=== 任务开始 ===");
     expect(rendered).toContain("=== 阶段开始｜clarify ===");
     expect(rendered).toContain("--- 角色开始｜clarifier @ clarify ---");
-    expect(rendered).toContain(">>> 角色输出｜clarifier @ clarify");
     expect(rendered).toContain("clarifier 已通过 stub Agent 执行 clarify 阶段。");
     expect(rendered).not.toContain("[WorkflowEvent:");
     expect(rendered).not.toContain("metadata=");
+    expect(rendered).not.toContain(">>> 角色输出｜");
     expect(rendered).toContain("TaskState 摘要：");
   });
 
@@ -107,10 +107,13 @@ describe("IntakeAgent", () => {
     expect(lines.join("\n")).toContain("Runtime 初始化成功");
     expect(lines.join("\n")).not.toContain("=== 任务开始 ===");
     expect(streamedLines.join("\n")).toContain("=== 任务开始 ===");
-    expect(streamedLines.join("\n")).toContain(">>> 角色输出｜clarifier @ clarify");
+    expect(streamedLines.join("\n")).toContain(
+      "clarifier 已通过 stub Agent 执行 clarify 阶段。",
+    );
+    expect(streamedLines.join("\n")).not.toContain(">>> 角色输出｜");
   });
 
-  it("renders escaped newlines in cli output as real line breaks", () => {
+  it("passes through role output without rewriting escape characters", () => {
     const rendered = formatWorkflowEventForCli({
       type: "role_output",
       taskId: "task_demo",
@@ -131,8 +134,31 @@ describe("IntakeAgent", () => {
       },
     } satisfies WorkflowEvent).join("\n");
 
-    expect(rendered).toContain("第一行\n第二行");
-    expect(rendered).not.toContain("\\n");
+    expect(rendered).toBe("第一行\\n第二行");
+  });
+
+  it("preserves role output whitespace and code block boundaries", () => {
+    const rendered = formatWorkflowEventForCli({
+      type: "role_output",
+      taskId: "task_demo",
+      message: "\n- 第一步\n\n```ts\nconst answer = 42;\n```\n",
+      timestamp: Date.now(),
+      taskState: {
+        taskId: "task_demo",
+        title: "demo",
+        currentPhase: "plan",
+        phaseStatus: "running",
+        status: TaskStatus.RUNNING,
+        updatedAt: Date.now(),
+      },
+      metadata: {
+        phase: "plan",
+        roleName: "planner",
+        outputKind: "summary",
+      },
+    } satisfies WorkflowEvent);
+
+    expect(rendered).toEqual(["\n- 第一步\n\n```ts\nconst answer = 42;\n```\n"]);
   });
 
   it("collects workflow orchestration before runtime initialization", async () => {
