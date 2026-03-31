@@ -209,12 +209,14 @@ function buildCodexCommandArgs(
   outputPath: string,
   sessionId?: string,
 ): string[] {
+  const configOverrides = buildCodexConfigOverrides(input.config);
   const baseArgs = sessionId
     ? [
         "exec",
         "resume",
         "--json",
         "--skip-git-repo-check",
+        ...configOverrides,
         "--output-last-message",
         outputPath,
         sessionId,
@@ -233,12 +235,20 @@ function buildCodexCommandArgs(
         input.context.projectConfig.roleExecutor.cwd,
         "--model",
         input.config.model,
+        ...configOverrides,
         "--output-last-message",
         outputPath,
         "-",
       ];
 
   return baseArgs;
+}
+
+function buildCodexConfigOverrides(config: RoleCodexConfig): string[] {
+  return [
+    "-c",
+    `openai_base_url=${JSON.stringify(config.baseUrl)}`,
+  ];
 }
 
 function buildExecutorEnv(
@@ -252,8 +262,8 @@ function buildExecutorEnv(
     ...baseEnv,
     // Codex 侧统一复用角色层收敛后的配置结果，
     // 避免执行器内部再自行推导模型鉴权入口。
+    // base url 已经通过 codex config override 传入，不能再走已弃用的 OPENAI_BASE_URL。
     OPENAI_API_KEY: input.config.apiKey,
-    OPENAI_BASE_URL: input.config.baseUrl,
   };
 }
 

@@ -379,12 +379,19 @@ describe("role layer", () => {
 
     const observedOutputPaths: string[] = [];
     const observedSandboxes: string[] = [];
+    const observedConfigOverrides: string[] = [];
+    const observedEnvBaseUrls: Array<string | undefined> = [];
     const executor = new CodexCliRoleAgentExecutor({
-      async runCommand(_file, args) {
+      async runCommand(_file, args, options) {
         const outputPath = args[args.indexOf("--output-last-message") + 1];
         const sandboxValue = args[args.indexOf("--sandbox") + 1];
+        const configOverrideIndex = args.indexOf("-c");
         observedOutputPaths.push(outputPath);
         observedSandboxes.push(sandboxValue);
+        if (configOverrideIndex >= 0) {
+          observedConfigOverrides.push(args[configOverrideIndex + 1]);
+        }
+        observedEnvBaseUrls.push(options.env.OPENAI_BASE_URL);
         await writeFile(outputPath, `result-${observedOutputPaths.length}`, "utf8");
       },
     });
@@ -458,6 +465,11 @@ describe("role layer", () => {
     expect(new Set(observedOutputPaths).size).toBe(2);
     expect(observedOutputPaths.every((filePath) => filePath.includes("/.aegisflow/runtime-cache/"))).toBe(true);
     expect(observedSandboxes).toEqual(["workspace-write", "workspace-write"]);
+    expect(observedConfigOverrides).toEqual([
+      'openai_base_url="https://api.openai.com/v1"',
+      'openai_base_url="https://api.openai.com/v1"',
+    ]);
+    expect(observedEnvBaseUrls).toEqual([undefined, undefined]);
   });
 
   it("streams visible codex event content during real executor execution", async () => {
@@ -817,8 +829,12 @@ describe("role layer", () => {
     expect(second).toContain("result-2");
     expect(observedArgs[0][0]).toBe("exec");
     expect(observedArgs[0]).not.toContain("resume");
+    expect(observedArgs[0]).toContain('-c');
+    expect(observedArgs[0]).toContain('openai_base_url="https://api.openai.com/v1"');
     expect(observedArgs[1].slice(0, 2)).toEqual(["exec", "resume"]);
     expect(observedArgs[1]).toContain("session-builder-1");
+    expect(observedArgs[1]).toContain('-c');
+    expect(observedArgs[1]).toContain('openai_base_url="https://api.openai.com/v1"');
   });
 
   it("passes read-only ExecutionContext into roles and persists string artifacts", async () => {
