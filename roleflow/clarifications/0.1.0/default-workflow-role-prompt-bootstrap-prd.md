@@ -86,7 +86,7 @@ flowchart TB
         P2[explorer.md]
         P3[planner.md]
         P4[builder.md]
-        P5[frontend-critic.md]
+        P5[critic.md]
         P6[test-designer.md]
         P7[test-writer.md]
     end

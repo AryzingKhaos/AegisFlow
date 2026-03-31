@@ -148,7 +148,7 @@ describe("role layer", () => {
 
       expect(
         promptBundle.promptSources.some((source) =>
-          source.endsWith("/roleflow/roles/frontend-critic.md"),
+          source.endsWith("/roleflow/roles/critic.md"),
         ),
       ).toBe(true);
       expect(
@@ -165,7 +165,7 @@ describe("role layer", () => {
       expect(promptBundle.prompt).toContain("DEFAULT_PROJECT_CRITIC_PROMPT");
       expect(
         promptBundle.promptWarnings.some((warning) =>
-          warning.includes("frontend-critic.md"),
+          warning.includes("critic.md"),
         ),
       ).toBe(false);
       expect(
@@ -245,11 +245,11 @@ describe("role layer", () => {
     expect(configContent).toContain('logDir: ".aegisflow/logs"');
     expect(configContent).toContain('prototypeDir: "/Users/aaron/code/roleflow/roles"');
     expect(configContent).toContain('promptDir: ".aegisflow/roles"');
-    expect(configContent).not.toContain("frontend-critic.md");
+    expect(configContent).not.toContain("critic.md");
     expect(projectRoleIndex).toContain("[critic.md](critic.md)");
-    expect(projectRoleIndex).not.toContain("[frontend-critic.md](frontend-critic.md)");
+    expect(projectRoleIndex).not.toContain("[critic.md](critic.md)");
     expect(sourceRoleIndex).toContain("[critic.md](critic.md)");
-    expect(sourceRoleIndex).not.toContain("[frontend-critic.md]");
+    expect(sourceRoleIndex).not.toContain("[critic.md]");
   });
 
   it("keeps materialized project role prompts aligned with source role prompts", async () => {

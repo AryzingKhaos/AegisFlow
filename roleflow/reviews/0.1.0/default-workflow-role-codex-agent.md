@@ -2,7 +2,7 @@
 
 ## 审计元信息
 
-- 审计角色：Frontend Critic
+- 审计角色：critic
 - 审计范围：`default-workflow` 角色 Codex Agent 执行链路、配置入口、执行器实现与相关测试
 - 审计对象：当前 `git` 修改区代码
 - 对照文档：

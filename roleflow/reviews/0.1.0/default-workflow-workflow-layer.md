@@ -2,7 +2,7 @@
 
 ## 审计元信息
 
-- 审计角色：Frontend Critic
+- 审计角色：critic
 - 审计范围：`default-workflow` 的 `Workflow` 层状态机、phase 编排、恢复链路、工件与快照持久化、Intake 对接面
 - 审计对象：当前 `git` 修改区代码
 - 对照文档：

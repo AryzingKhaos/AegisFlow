@@ -11,7 +11,7 @@ const BUILTIN_ROLE_FILE_MAP: Record<RoleName, string> = {
   explorer: "explorer.md",
   planner: "planner.md",
   builder: "builder.md",
-  critic: "frontend-critic.md",
+  critic: "critic.md",
   "test-designer": "test-designer.md",
   tester: "tester.md",
   "test-writer": "test-writer.md",

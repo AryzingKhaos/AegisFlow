@@ -27,7 +27,7 @@
 | [clarifier.md](clarifier.md) | `/Users/aaron/code/roleflow/roles/clarifier.md` | 需求澄清师 | PRD 输出路径、索引同步、命名规则 |
 | [commit-writer.md](commit-writer.md) | `/Users/aaron/code/roleflow/roles/commit-writer.md` | 提交文案撰写者 | 当前项目无额外实例化约束 |
 | [explorer.md](explorer.md) | `/Users/aaron/code/roleflow/roles/explorer.md` | 探索者 | explorations 目录、命名规范、索引路径 |
-| [critic.md](critic.md) | `/Users/aaron/code/roleflow/roles/frontend-critic.md` | 审查者 | 审计必读规范、i18n 文件、日志与依赖检查约束 |
+| [critic.md](critic.md) | `/Users/aaron/code/roleflow/roles/critic.md` | 审查者 | 审计必读规范、i18n 文件、日志与依赖检查约束 |
 | [planner.md](planner.md) | `/Users/aaron/code/roleflow/roles/planner.md` | 规划者 | requirements / implementation / features 路径与命名规则 |
 | [test-designer.md](test-designer.md) | `/Users/aaron/code/roleflow/roles/test-designer.md` | 测试设计者 | testDesign 输出路径与调试打印记录位置 |
 | [tester.md](tester.md) | 暂无 | 测试执行者 | 当前仅保留最小职责定义，后续由用户补充 |

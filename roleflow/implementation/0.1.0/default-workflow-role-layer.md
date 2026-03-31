@@ -18,7 +18,7 @@
 - 用户补充澄清：本次实现应保留并正式收敛当前代码中 `WorkflowController` 已使用的结构化 `RoleResult` 形态；现行 PRD 已明确 `RoleResult` 为结构化结果对象
 - 用户补充澄清：`tester` 已纳入本期 role-layer 范围
 - 用户补充澄清：`targetProjectRolePromptPath` 需要在本次实现中恢复并参与角色 prompt 组装；该字段是 `roles.promptDir` 加载后的内存值，若配置了 `roles.overrides.*.extraInstructions`，则 override 文件优先于默认同名文件解析
-- 角色职责来源：`roleflow/context/roles/clarifier.md`、`roleflow/context/roles/explorer.md`、`roleflow/context/roles/planner.md`、`roleflow/context/roles/builder.md`、`roleflow/context/roles/frontend-critic.md`、`roleflow/context/roles/test-designer.md`、`roleflow/context/roles/test-writer.md`、`roleflow/context/roles/tester.md`、`roleflow/context/roles/index.md`
+- 角色职责来源：`roleflow/context/roles/clarifier.md`、`roleflow/context/roles/explorer.md`、`roleflow/context/roles/planner.md`、`roleflow/context/roles/builder.md`、`roleflow/context/roles/critic.md`、`roleflow/context/roles/test-designer.md`、`roleflow/context/roles/test-writer.md`、`roleflow/context/roles/tester.md`、`roleflow/context/roles/index.md`
 - 当前实现参考：`src/default-workflow/shared/types.ts`
 - 当前实现参考：`src/default-workflow/runtime/dependencies.ts`
 - 当前实现参考：`src/default-workflow/runtime/builder.ts`
@@ -46,7 +46,7 @@
 - 将 `ExecutionContext.artifacts` 收敛为只读工件视图而不是完整 `ArtifactManager`，使 Role 只能读取必要工件内容，不能自行决定工件写入、覆盖和落盘时机。
 - 显式收敛 `RoleResult`：保留类型名 `RoleResult`，并基于最新需求将其正式定义为结构化结果对象，至少包含 `summary`、`artifacts`、`metadata?`，其中 `artifacts` 定义为工件内容数组 `string[]`。
 - 新增 `v0.1` 角色蓝图接入能力，至少覆盖 `clarifier`、`explorer`、`planner`、`builder`、`critic`、`test-designer`、`tester`、`test-writer`，并保持它们与 `roleflow/context/roles/` 中实例层职责一致。
-- 显式处理 `critic` 概念名与角色原型文件 `frontend-critic.md` 的映射；AegisFlow 项目侧继续通过 `roles.overrides.critic.extraInstructions` 指向 `frontend-critic.md`，避免概念名和文件名再次漂移。
+- 显式处理 `critic` 的职责来源，保持角色原型与项目侧文件统一为 `critic.md`，避免概念名和文件名再次漂移。
 - 恢复 `ProjectConfig.targetProjectRolePromptPath` 到 Role 层初始化链路，使角色能够读取目标项目下的角色特定额外提示词；该字段在运行时表示 `roles.promptDir` 加载后的内存值，默认按严格同名文件读取；若配置了 `roles.overrides.*.extraInstructions`，则优先使用 override 指向的文件；同名文件采用“追加”方式合并，且目标项目下的角色职责约束优先于角色原型职责。
 - 保持 `Role` 层不承担 `Workflow` 的状态推进、不承担 `Intake` 的用户交互、不直接写工件；工件落盘仍由 `Workflow` 协调 `ArtifactManager` 完成。
 - 最终交付结果应达到：`Workflow -> RoleRegistry -> Role` 的调用边界稳定可测，角色可基于统一 Agent 初始化方式运行，`v0.1` 角色集合可通过公共机制接入，并且副作用与工件职责边界清晰。
@@ -65,7 +65,7 @@
 - `RoleDefinition.create` 按“受限依赖注入”处理：`project.md` 与 PRD 已收敛为 `create(roleRuntime: RoleRuntime)`，本次实现需要严格对齐这一公共契约，只暴露角色初始化真正允许使用的共享依赖，避免角色在初始化阶段直接读取 `taskState` 或调用 `workflow.run()` / `workflow.resume()`。
 - 各角色按“共享 Agent 基座 + 角色专属职责提示词”接入：公共基座负责统一模型初始化、公共系统提示、运行入口；角色实例文件负责补充职责边界，不允许公共层把各角色职责抹平为同一种执行器。
 - `builder`、`tester`、`test-writer`、`test-designer` 等允许副作用的角色，要在角色层显式保留副作用能力入口；但即便角色进行了代码修改、测试执行或单测调整，也仍只通过 `RoleResult` 把结果交还 `Workflow`，不自行写工件、不自行发 `WorkflowEvent`。
-- `critic` 角色名继续保持为 `critic`；角色原型映射到 `/Users/aaron/code/roleflow/roles/frontend-critic.md`，AegisFlow 项目侧通过 override 指向 `roleflow/context/roles/frontend-critic.md` 物化后的文件，避免概念名和文件名再次漂移。
+- `critic` 角色名继续保持为 `critic`；角色原型与 AegisFlow 项目侧文件都统一使用 `critic.md`，避免概念名和文件名再次漂移。
 - `targetProjectRolePromptPath` 按“运行时目录归一化 + 严格同名追加 + 项目职责优先”处理：其运行时值等价于 `roles.promptDir` 加载后的目录；默认仅按严格同名角色文件读取，例如 `planner.md`、`builder.md`、`critic.md`、`tester.md`；若某角色配置了 `roles.overrides.*.extraInstructions`，则优先读取 override 指向的文件，而不是回落到默认同名文件解析；若目标项目中存在对应文件，则在角色原型文档基础上追加该文件内容，但解释优先级以目标项目中的角色职责约束为准；若文件缺失，则回退到角色原型文档，不把缺失视为启动失败。
 
 ---
@@ -106,7 +106,7 @@ flowchart TD
 - `RoleRuntime` 至少要能提供 `projectConfig`、`eventLogger`、`eventEmitter`、`roleRegistry` 等共享依赖；完整 `ArtifactManager` 不应进入 `RoleRuntime`，避免角色初始化再次发明工件写入链路。
 - 角色 Agent 的模型配置应统一来源于共享配置解析，而不是每个角色自行读取环境变量；默认接入方式继续使用 `import { ChatOpenAI } from "@langchain/openai"`。
 - 角色 Agent 初始化时必须去掉 `temperature` 设置；如果后续要扩展到更多模型参数，也应在共享初始化入口集中处理，而不是下沉到单个角色。
-- 角色 prompt 组装至少要包含公共系统约束和角色实例层职责约束；`critic` 需要显式绑定到 `frontend-critic.md`，不能因文件名差异丢失职责来源。
+- 角色 prompt 组装至少要包含公共系统约束和角色实例层职责约束；`critic` 应按统一的 `critic.md` 文件名装载，避免因命名漂移丢失职责来源。
 - 角色运行所需的阶段材料应优先通过 `run(input, context)` 中的 `input` 传入，而不是继续把 `latestInput`、`taskState` 一类 Workflow 内部态混入 `ExecutionContext`。
 - 如果角色在执行阶段确实需要读取历史工件，只应通过 `ExecutionContext.artifacts` 提供的只读能力访问；该能力不应暴露任何写入、删除、重命名或落盘控制接口。
 - 角色 prompt 组装必须支持 `ProjectConfig.targetProjectRolePromptPath`：该字段是 `roles.promptDir` 加载后的运行时目录值；默认只读取严格同名角色文件，例如 `planner.md`、`builder.md`、`critic.md`、`tester.md`，不读取其他非同名文档。
@@ -123,7 +123,7 @@ flowchart TD
 - `explorer` 的职责边界对齐 `roleflow/context/roles/explorer.md`，只做上下文和代码探索，不直接给出实现方案或修改代码。
 - `planner` 的职责边界对齐 `roleflow/context/roles/planner.md`，只做方案和 implementation plan，不编写实现代码。
 - `builder` 的职责边界对齐 `roleflow/context/roles/builder.md`，允许修改代码，但不修改需求、不写 workflow 工件。
-- `critic` 的职责边界对齐 `roleflow/context/roles/frontend-critic.md`，以问题识别和风险审查为主，不修改代码。
+- `critic` 的职责边界对齐 `roleflow/context/roles/critic.md`，以问题识别和风险审查为主，不修改代码。
 - `test-designer` 的职责边界对齐 `roleflow/context/roles/test-designer.md`，允许为测试目的插入和清理调试打印，但不改业务方案。
 - `tester` 的职责边界对齐 `roleflow/context/roles/tester.md`，负责执行 `test` phase 的测试任务并输出测试执行结果，不替代 `test-writer` 编写单测。
 - `test-writer` 的职责边界对齐 `roleflow/context/roles/test-writer.md`，允许新增或修改单元测试，不替代 `builder` 修改业务逻辑。
@@ -148,7 +148,7 @@ flowchart TD
 - `RoleResult` 在公共层被显式定义为结构化结果对象，至少包含 `summary: string`、`artifacts: string[]`、`metadata?`，其中 `artifacts` 明确表示工件内容，并与 `WorkflowController` 的消费方式保持一致。
 - `Workflow -> RoleRegistry -> Role` 的调用链清晰可测，`Workflow` 不绕过注册表直接实例化角色。
 - `clarifier`、`explorer`、`planner`、`builder`、`critic`、`test-designer`、`tester`、`test-writer` 至少这 8 个角色可以通过统一公共机制接入，并各自保持与实例层文档一致的职责边界。
-- `critic` 概念角色与角色原型 `frontend-critic.md` 的映射关系在实现中是显式的，AegisFlow 项目侧则通过 override 显式映射到 `frontend-critic.md`。
+- `critic` 概念角色与角色原型 `critic.md` 的默认解析关系在实现中应保持显式且稳定。
 - `targetProjectRolePromptPath` 已进入 `ProjectConfig` 和角色 prompt 组装链路；其运行时值等价于 `roles.promptDir`，且 `roles.overrides.*.extraInstructions` 优先于默认同名文件解析；系统以“追加内容、项目职责优先”的方式与角色原型文档组合，不存在时有明确 fallback。
 - `builder`、`tester`、`test-designer`、`test-writer` 等角色可以有副作用，但不会因此直接写工件、推进 phase 或替代 `Intake` 与用户交互。
 - 针对注册机制、实例化、上下文传递、结果边界和职责映射，至少有一组自动化测试或可执行手动验收清单覆盖。
@@ -171,7 +171,7 @@ flowchart TD
 - [x] 收敛 `RoleRegistry.list()` 的公共返回值，避免继续把描述性元数据绑定到该接口上。
 - [x] 抽离统一的角色 Agent 初始化函数，复用共享模型配置解析，使用 `ChatOpenAI`，并去掉 `temperature` 设置。
 - [x] 设计角色公共 prompt 基座，并把实例层角色文档与 `targetProjectRolePromptPath` 下严格同名的项目角色文件一起接入角色初始化流程；若存在 `roles.overrides.*.extraInstructions`，则优先接入 override 文件。
-- [x] 明确 `critic` 到 `frontend-critic.md` 的职责映射，并在代码中固定该映射关系。
+- [x] 明确 `critic` 的职责来源文件为 `critic.md`，并在实现中固定该默认解析关系。
 - [x] 补齐 `ExecutionContext.artifacts` 只读工件字段，并把 `taskState`、`latestInput` 从 Role 层公共接口中移除；如迁移期仍需兼容，限制在内部适配层处理。
 - [x] 把 `targetProjectRolePromptPath` 补回 `ProjectConfig`、运行时装配流程和角色初始化链路，并落实“`roles.promptDir` 内存归一化、override 优先、严格同名读取、追加内容、项目职责优先、缺失时回退”的规则。
 - [x] 实现 `clarifier`、`explorer`、`planner`、`builder`、`critic`、`test-designer`、`tester`、`test-writer` 的默认 `RoleDefinition` 注册。

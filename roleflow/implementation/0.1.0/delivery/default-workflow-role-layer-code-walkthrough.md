@@ -183,7 +183,7 @@ flowchart LR
 flowchart TD
     A[buildRolePrompt] --> B[common.md]
     A --> C[角色内置文档]
-    C -->|critic| D[frontend-critic.md]
+    C -->|critic| D[critic.md]
     A --> E{rolePromptOverrides 命中?}
     E -->|是| F[override 文件]
     E -->|否| G[targetProjectRolePromptPath/同名文件]
@@ -206,7 +206,7 @@ flowchart TD
 本次新增的关键点：
 
 - 内置公共角色约束来自 `roleflow/context/roles/common.md`
-- `critic` 显式映射到 `frontend-critic.md`
+- `critic` 显式映射到 `critic.md`
 - 项目侧角色提示词来自 `ProjectConfig.targetProjectRolePromptPath`
 - 若 `projectConfig.rolePromptOverrides[roleName]` 存在，则 override 文件优先
 - 内置角色文档路径改为相对模块解析，不再依赖 `process.cwd()`

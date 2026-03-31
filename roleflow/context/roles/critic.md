@@ -1,6 +1,6 @@
 # Critic（审查者）
 
-> 角色原型：/Users/aaron/code/roleflow/roles/frontend-critic.md
+> 角色原型：/Users/aaron/code/roleflow/roles/critic.md
 > 公共规范：@roleflow/context/roles/common.md
 
 ## 本项目专项检查

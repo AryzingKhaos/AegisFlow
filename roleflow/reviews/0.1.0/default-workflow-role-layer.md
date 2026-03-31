@@ -2,7 +2,7 @@
 
 ## 审计元信息
 
-- 审计角色：Frontend Critic
+- 审计角色：critic
 - 审计范围：`default-workflow` 的 `Role` 层公共机制、`RoleRegistry / RoleDefinition / RoleRuntime / ExecutionContext / RoleResult`、prompt 组装与 `Workflow -> Role` 调用边界
 - 审计对象：当前 `git` 修改区代码
 - 对照文档：
@@ -32,16 +32,16 @@
 
 # 次要问题（中风险）
 
-## [配置漂移] `aegisproject.yaml` 位置错误，且 `frontend-critic` 重命名后的配置、索引和 PRD 没有同步
+## [配置漂移] `aegisproject.yaml` 位置错误，且 `critic` 重命名后的配置、索引和 PRD 没有同步
 - **位置**：`[aegisproject.yaml](/Users/aaron/code/Aegisflow/aegisproject.yaml#L1)`、`[aegisproject.yaml](/Users/aaron/code/Aegisflow/aegisproject.yaml#L42)`、`[.aegisflow/roles/index.md](/Users/aaron/code/Aegisflow/.aegisflow/roles/index.md#L30)`、`[roleflow/context/roles/index.md](/Users/aaron/code/Aegisflow/roleflow/context/roles/index.md#L30)`、`[default-workflow-role-prompt-bootstrap-prd.md](/Users/aaron/code/Aegisflow/roleflow/clarifications/0.1.0/default-workflow-role-prompt-bootstrap-prd.md#L153)`
-- **描述**：按照当前补充约束，`aegisproject.yaml` 的正确位置应是 `.aegisflow/` 下，而不是仓库根目录。当前修改区新增的是根目录 `[aegisproject.yaml](/Users/aaron/code/Aegisflow/aegisproject.yaml)`，文件位置已经不符合约束；同时它内部仍保留 `roles.overrides.critic.extraInstructions: ".aegisflow/roles/frontend-critic.md"`，两个角色索引文档也仍把实例文件登记为 `frontend-critic.md`。除此之外，新增的 `[default-workflow-role-prompt-bootstrap-prd.md](/Users/aaron/code/Aegisflow/roleflow/clarifications/0.1.0/default-workflow-role-prompt-bootstrap-prd.md#L153)` 还在继续要求“仓库根目录必须创建 `aegisproject.yaml`”。也就是说，这次重命名只改了角色文件本身，没有把配置入口、索引清单和需求文档一起收敛。
+- **描述**：按照当前补充约束，`aegisproject.yaml` 的正确位置应是 `.aegisflow/` 下，而不是仓库根目录。当前修改区新增的是根目录 `[aegisproject.yaml](/Users/aaron/code/Aegisflow/aegisproject.yaml)`，文件位置已经不符合约束；同时它内部仍保留旧的 `critic` 额外指令路径，两个角色索引文档也仍把实例文件登记成旧名称。除此之外，新增的 `[default-workflow-role-prompt-bootstrap-prd.md](/Users/aaron/code/Aegisflow/roleflow/clarifications/0.1.0/default-workflow-role-prompt-bootstrap-prd.md#L153)` 还在继续要求“仓库根目录必须创建 `aegisproject.yaml`”。也就是说，这次重命名只改了角色文件本身，没有把配置入口、索引清单和需求文档一起收敛。
 - **触发条件**：阅读项目配置、索引文档、PRD，或后续真正接入项目配置文件加载时。
 - **影响范围**：当前运行时虽然因为默认路径命中 `critic.md` 没有立刻出错，但配置文件放错位置会让后续配置加载链路直接找不到该文件；即使后续移动到正确目录，里面的 override 仍会继续指向不存在的旧路径。同时索引文档和 PRD 会持续误导维护者按旧路径和旧位置实现。
 - **风险级别**：中
 - **严重程度**：配置失真
 
 ## [项目约束加载] 项目侧 `common.md` 没有进入角色 prompt 组装，公共实例层约束会被整体跳过
-- **位置**：`[prompts.ts](/Users/aaron/code/Aegisflow/src/default-workflow/role/prompts.ts#L42)`、`[prompts.ts](/Users/aaron/code/Aegisflow/src/default-workflow/role/prompts.ts#L64)`、`[common.md](/Users/aaron/code/Aegisflow/.aegisflow/roles/common.md#L1)`、`[frontend-critic.md](/Users/aaron/code/Aegisflow/.aegisflow/roles/frontend-critic.md#L3)`
+- **位置**：`[prompts.ts](/Users/aaron/code/Aegisflow/src/default-workflow/role/prompts.ts#L42)`、`[prompts.ts](/Users/aaron/code/Aegisflow/src/default-workflow/role/prompts.ts#L64)`、`[common.md](/Users/aaron/code/Aegisflow/.aegisflow/roles/common.md#L1)`、`[critic.md](/Users/aaron/code/Aegisflow/.aegisflow/roles/critic.md#L3)`
 - **描述**：当前 prompt 组装只读取“角色原型公共文档 + 角色原型文档 + 项目侧同名角色文件/override 文件”，不会读取项目侧的 `[common.md](/Users/aaron/code/Aegisflow/.aegisflow/roles/common.md)`。而项目侧角色文件本身只是用一行引用去声明公共规范，并没有把公共约束正文重复写入角色文件中。这意味着所有角色默认都会遗漏项目公共实例层约束，例如“所有文档输出均使用中文”“开始任务前阅读 `project.md`”等内容。
 - **触发条件**：任意默认角色通过 `buildRolePrompt()` 组装 prompt。
 - **影响范围**：角色 prompt 实际读取到的项目侧约束不完整，所有角色都可能丢失 AegisFlow 的公共项目约束，不仅限于 `critic`。
@@ -84,7 +84,7 @@
 
 # 修复优先级
 
-- **P1**：`aegisproject.yaml` 放置位置错误，且 `frontend-critic` 重命名后的配置与索引漂移问题
+- **P1**：`aegisproject.yaml` 放置位置错误，且 `critic` 重命名后的配置与索引漂移问题
 - **P1**：项目侧 `common.md` 未进入角色 prompt 组装的问题
 - **P3**：缺少默认 prompt 解析路径测试的问题
 
@@ -92,7 +92,7 @@
 
 # 测试建议
 
-- 增加默认 `critic.md` 路径测试，明确断言 `[critic.md](/Users/aaron/code/Aegisflow/.aegisflow/roles/critic.md)` 会进入 `promptSources`，并避免继续把旧的 `frontend-critic.md` 当作项目侧文件名。
+- 增加默认 `critic.md` 路径测试，明确断言 `[critic.md](/Users/aaron/code/Aegisflow/.aegisflow/roles/critic.md)` 会进入 `promptSources`，并避免继续把旧的 `critic` 文件名当作项目侧文件名。
 - 增加角色 prompt 组装测试，断言项目侧 `[common.md](/Users/aaron/code/Aegisflow/.aegisflow/roles/common.md)` 也会被纳入最终 prompt。
 - 增加配置与索引一致性检查，至少保证 `.aegisflow/aegisproject.yaml` 的存在位置正确，且其中角色文件名、角色索引与 `.aegisflow/roles/` 实际文件一致。
 

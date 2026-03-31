@@ -2,7 +2,7 @@
 
 ## 审计元信息
 
-- 审计角色：Frontend Critic
+- 审计角色：critic
 - 审计范围：`default-workflow` 的 `Intake` CLI 入口、意图识别、`Runtime` 装配、恢复链路、事件展示
 - 审计对象：当前 `git` 暂存区代码
 - 对照文档：

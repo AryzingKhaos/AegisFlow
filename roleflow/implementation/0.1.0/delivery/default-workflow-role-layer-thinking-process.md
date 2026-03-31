@@ -311,14 +311,14 @@ flowchart LR
 
 这一步的关键判断是：
 
-- 原型层仍然可以保持 `frontend-critic.md`
-- 但项目侧实例层已经不该继续保留 `frontend-critic.md`
+- 原型层已统一为 `critic.md`
+- 项目侧实例层也应继续保持 `critic.md`
 
 因为项目侧按 role name 同名读取更稳定。
 
 所以我最终收敛成：
 
-- 原型层：`/Users/aaron/code/roleflow/roles/frontend-critic.md`
+- 原型层：`/Users/aaron/code/roleflow/roles/critic.md`
 - 项目侧实例层：`.aegisflow/roles/critic.md`
 - 源文档层：`roleflow/context/roles/critic.md`
 

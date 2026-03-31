@@ -2,7 +2,7 @@
 
 ## 审计元信息
 
-- 审计角色：Frontend Critic
+- 审计角色：critic
 - 审计范围：`default-workflow-role-prompt-bootstrap` 对应的项目配置、项目侧提示词物化、`critic` 默认同名装载规则与相关测试
 - 审计对象：当前 `git` 修改区代码
 - 对照文档：
@@ -31,7 +31,7 @@
 
 ## [测试覆盖] 现有测试没有完整覆盖 `.aegisflow/aegisproject.yaml` 的关键字段
 - **位置**：`[role.test.ts](/Users/aaron/code/Aegisflow/src/default-workflow/testing/role.test.ts#L226)`、`[default-workflow-role-prompt-bootstrap.md](/Users/aaron/code/Aegisflow/roleflow/implementation/0.1.0/default-workflow-role-prompt-bootstrap.md#L102)`
-- **描述**：新增测试已经检查了 `.aegisflow/aegisproject.yaml` 存在、`promptDir` 正确、且不再引用 `frontend-critic.md`，这一点是有效的；但还没有断言 `roles.prototypeDir` 是否保持为 `/Users/aaron/code/roleflow/roles`。而计划文档已将 `roles.prototypeDir` 与 `roles.promptDir` 一起列为本期收敛项。
+- **描述**：新增测试已经检查了 `.aegisflow/aegisproject.yaml` 存在、`promptDir` 正确、且不再引用旧的 `critic` 文件名，这一点是有效的；但还没有断言 `roles.prototypeDir` 是否保持为 `/Users/aaron/code/roleflow/roles`。而计划文档已将 `roles.prototypeDir` 与 `roles.promptDir` 一起列为本期收敛项。
 - **影响范围**：如果未来有人误改 `prototypeDir`，当前测试不会拦截。
 - **风险级别**：低
 - **类型**：可维护性
