@@ -108,6 +108,8 @@ export class DefaultRoleRegistry implements RoleRegistry {
       };
     }
 
+    // Intake 运行态输入只允许落到当前 active role。
+    // 如果实例尚未创建，这里会按 activeRoleName 懒创建对应 role。
     const role = this.roleInstances.get(this.activeRoleName) ?? this.get(this.activeRoleName);
     return (
       (await role.sendInput?.(input)) ?? {
@@ -230,6 +232,8 @@ function createDefaultRoleDefinition(
           });
         },
         async sendInput(input) {
+          // 运行中补充输入也必须复用同一个角色 bootstrap，
+          // 这样 prompt、executor、sessionId 才能保持在同一条 role 会话链上。
           const bootstrap = await ensureBootstrap();
 
           return (

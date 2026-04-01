@@ -204,6 +204,8 @@ export class DefaultWorkflowController implements WorkflowController {
     if (this.dependencies.taskState.status === TaskStatus.RUNNING) {
       await this.saveLatestInput(message);
       this.dependencies.taskState.updatedAt = timestamp;
+      // 任务处于 RUNNING 时，participate 不再走 resume 链路，
+      // 而是作为运行中补充输入路由给当前 active role。
       const inputDelivery =
         (await this.dependencies.roleRegistry.sendInputToActiveRole?.(message)) ?? {
           accepted: false,

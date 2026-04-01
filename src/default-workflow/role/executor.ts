@@ -84,6 +84,8 @@ export class CodexCliRoleAgentExecutor implements RoleAgentExecutor {
           input: input.prompt,
           env: buildExecutorEnv(input),
           timeoutMs: executorConfig.timeoutMs,
+          // session 只负责“如何在 PTY 里串行执行 turn”，
+          // 具体 follow-up turn 的 codex 参数仍由上层执行器决定。
           buildFollowUpArgs: (liveInput: string, sessionId?: string) =>
             buildCodexParticipationCommandArgs(
               outputPath,
@@ -268,6 +270,8 @@ export function createPersistentCodexCliSession(
   let currentRequest: ActivePtyRequest | null = null;
   let currentCommandCwd = process.cwd();
   let currentSessionId: string | undefined;
+  // 这份队列专门接住“上一轮 turn 已结束，但下一轮 execute 尚未启动”窗口里的输入，
+  // 防止 Workflow 已确认透传后又因为接收窗口切换而丢失。
   const pendingInputs: string[] = [];
   let disposed = false;
   let failedError: Error | undefined;
@@ -293,18 +297,26 @@ export function createPersistentCodexCliSession(
       reject(error);
     };
   });
+  // readyPromise 可能在真正 await 之前就因为 PTY 异常退出而 reject。
+  // 这里先吞掉未处理拒绝告警，真实错误仍会在后续 await readyPromise 时抛出。
   void readyPromise.catch(() => undefined);
   const failSession = (error: Error): void => {
+    // failedError 一旦写入，表示这个 role terminal 已经永久不可用。
+    // 后续 execute/sendInput 都必须直接失败，不能继续把它当成可恢复的空闲会话。
     failedError ??= error;
     rejectReadyPromise?.(failedError);
 
     if (currentRequest) {
+      // PTY 一旦进入失败态，当前正在执行的 turn 也必须同步失败，
+      // 否则上层会误以为 role 仍可继续产出结果。
       const activeRequest = currentRequest;
       currentRequest = null;
       activeRequest.reject(failedError);
     }
   };
   const assertSessionAvailable = (): void => {
+    // 这里集中收口 session 可用性判断，避免 execute/sendInput/shutdown
+    // 各自维护一套不一致的“是否还能继续使用这个 PTY”的逻辑。
     if (disposed) {
       throw new Error("codex PTY session has been disposed");
     }
@@ -339,9 +351,13 @@ export function createPersistentCodexCliSession(
   };
 
   terminal.onData((chunk: string) => {
+    // node-pty 给的是原始字符流，不保证按行切分。
+    // 这里先把 chunk 累到 outputBuffer，再统一按换行拆成“逻辑行”做后续解析。
     outputBuffer += normalizeProcessChunk(chunk);
     outputBuffer = flushStdoutLines(outputBuffer, (line) => {
       if (currentRequest) {
+        // 共享 PTY 流上的输出先按“当前 turn”解释，
+        // 由 exitMarker/sessionId 解析器决定这是结束信号还是可见输出。
         routePtyLine(line, currentRequest, (sessionId) => {
           currentSessionId = sessionId;
         });
@@ -356,6 +372,7 @@ export function createPersistentCodexCliSession(
     const exitError = formatPtyExitError(event);
 
     if (!readyPromiseSettled()) {
+      // shell 在 ready marker 建立前就退出时，后续 execute 不能再一直卡在 readyPromise。
       failSession(exitError);
       return;
     }
@@ -369,6 +386,8 @@ export function createPersistentCodexCliSession(
 
   // role 的运行时实体是长期存在的 PTY 终端；
   // 后续多个 codex turn 都在这个终端里串行执行，而不是每轮重新创建一个 role terminal。
+  // `stty -echo` 是为了避免用户看见 shell 回显的命令本身；
+  // `readyMarker` 则是这个 shell 首次进入“可接命令空闲态”的确认信号。
   terminal.write(`stty -echo\r`);
   terminal.write(`printf '${readyMarker}\\n'\r`);
 
@@ -379,8 +398,12 @@ export function createPersistentCodexCliSession(
       const nextCommand = commandQueue.catch(() => undefined).then(async () => {
         assertSessionAvailable();
 
+        // 第一轮命令启动前，必须先确认 shell 已经就绪。
+        // 否则 role terminal 看似存在，但底层 shell 可能还没真正进入可执行状态。
         await readyPromise;
         assertSessionAvailable();
+        // 同一个 role terminal 可以跨多轮 turn 复用，
+        // 但每轮都要先切回目标 cwd，避免 shell 上下文漂移。
         await ensurePtyWorkingDirectory(terminal, options.cwd, currentCommandCwd);
         currentCommandCwd = options.cwd;
         await runCommandInsidePty(terminal, {
@@ -432,6 +455,8 @@ export function createPersistentCodexCliSession(
 
       // 运行中补充输入不再继续写当前 codex 进程的 stdin；
       // 而是显式挂到当前 role terminal 的下一轮 resume turn，保证协议边界清晰。
+      // 如果当前 turn 还在执行，就先挂到 currentRequest；
+      // 如果当前 turn 已结束但 executeCommand 还没把下一轮启动起来，就先落到 pendingInputs。
       if (currentRequest) {
         currentRequest.pendingInputs.push(input);
       } else {
@@ -513,10 +538,14 @@ async function runCommandInsidePty(
     },
   };
   let commandArgs = input.args;
+  // currentRequest 只覆盖这一次 executeCommand 链路。
+  // live input 如果命中这个窗口，会先进入 request.pendingInputs，再被转换成下一轮 resume turn。
   input.setCurrentRequest(request);
 
   try {
     while (true) {
+      // 这里的 while 不是“重复执行同一条命令”，
+      // 而是把“首轮 execute + 若干轮运行中补充输入触发的 resume turn”串成一个完整执行链。
       await runSinglePtyCommand(terminal, {
         file: input.file,
         args: commandArgs,
@@ -529,6 +558,7 @@ async function runCommandInsidePty(
         request.pendingInputs.shift() ?? input.takePendingInput();
 
       if (!pendingInput) {
+        // 没有新的运行中输入时，这一整次 executeCommand 链路才算真正结束。
         return;
       }
 
@@ -546,6 +576,8 @@ async function runCommandInsidePty(
       commandArgs = followUpArgs;
     }
   } finally {
+    // turn 链路结束后必须清理 currentRequest，
+    // 否则 idle 输出会被误判成仍属于旧 turn。
     input.clearCurrentRequest();
   }
 }
@@ -565,10 +597,14 @@ async function runSinglePtyCommand(
     .slice(2, 10)}__`;
 
   await new Promise<void>((resolve, reject) => {
+    // timeout 只覆盖“这一轮 codex turn”，而不是整个 role terminal 的生命周期。
+    // terminal 本身可以继续存活，后续是否还能复用由上层 failSession / shutdown 决定。
     const timeoutHandle = setTimeout(() => {
       reject(new Error(`codex exited with timeout after ${input.timeoutMs}ms`));
     }, input.timeoutMs);
 
+    // 同一个 request 对象会跨多轮 turn 复用，
+    // 但每轮都必须换一个新的 exitMarker，避免旧 turn 的尾部输出误命中新 turn。
     input.request.exitMarker = exitMarker;
     input.request.resolve = () => {
       clearTimeout(timeoutHandle);
@@ -579,6 +615,8 @@ async function runSinglePtyCommand(
       reject(error);
     };
 
+    // shell 真正执行的是“codex 子命令 + 唯一 exitMarker 打点”。
+    // 这样 routePtyLine() 才能在共享 PTY 流里识别某一轮 turn 的结束位置。
     terminal.write(
       buildPtyCommandLine(input.file, input.args, input.env, exitMarker),
     );
@@ -600,6 +638,10 @@ function buildPtyCommandLine(
     .filter((segment) => segment.length > 0)
     .join(" ");
 
+  // 这里交给 shell 的不是单纯一个 codex 命令，而是：
+  // 1. 带环境前缀的 codex 子命令
+  // 2. codex 退出后立即打印 exitMarker:exitCode
+  // 后面 routePtyLine() 看到这个标记，才知道这一轮 turn 已经结束。
   return `${command} ; printf '${exitMarker}:%s\\n' "$?"\r`;
 }
 
@@ -608,6 +650,8 @@ function routePtyLine(
   request: ActivePtyRequest,
   onSessionId?: (sessionId: string) => void,
 ): void {
+  // Codex JSONL 事件和 shell 自己的 exitMarker 会混在同一条 PTY 输出流里。
+  // 这里统一做两件事：提取 thread/session id，以及识别本轮 turn 的结束信号。
   const discoveredSessionId = extractSessionIdFromCodexEventLine(line);
 
   if (discoveredSessionId) {
@@ -618,6 +662,8 @@ function routePtyLine(
     const exitCode = Number(line.slice(request.exitMarker.length + 1));
 
     if (!Number.isFinite(exitCode) || exitCode !== 0) {
+      // shell 负责打印 exit code，但业务上要把它转成当前 turn 的 reject，
+      // 这样 executeCommand 才会把本轮 codex 失败正确传播给 Workflow。
       request.reject(new Error(`codex exited with code ${String(exitCode)}`));
       return;
     }
