@@ -62,6 +62,7 @@ interface ResumeIndexSnapshot {
 
 interface IntakeAgentOptions {
   onWorkflowOutput?: (lines: string[]) => void;
+  onWorkflowEvent?: (event: WorkflowEvent) => void;
 }
 
 export class IntakeAgent {
@@ -454,6 +455,7 @@ export class IntakeAgent {
     // 每次 Runtime 重建后都重新绑定事件监听，
     // 避免中断恢复时复用旧的内存监听器。
     runtime.eventEmitter.on("workflow_event", (event: WorkflowEvent) => {
+      this.options.onWorkflowEvent?.(event);
       const lines = this.formatWorkflowEvent(event);
 
       if (this.options.onWorkflowOutput) {
