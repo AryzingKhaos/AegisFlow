@@ -14,7 +14,7 @@
 
 AegisFlow 通过 `Clarify`、`Explore`、`Plan`、`Build`、`Review`、`Test Design` 等阶段，把真实软件开发任务组织成一条可控、可恢复、可审阅的工作流。
 
-在该架构中，`Workflow` 层是整个 `default-workflow` 的编排核心。它不负责与用户直接对话，也不负责具体角色内部推理，而是负责接收 `Intake` 层输入、驱动 `TaskState` 状态机、调用 `Role`、写入工件、广播事件、记录日志，并在中断与恢复场景下保持任务过程可继续。
+在该架构中，`Workflow` 层是整个 `default-workflow` 的编排核心。它不负责与用户直接对话，也不负责具体角色内部推理，而是负责接收 `Intake` 层输入、驱动 `TaskState` 状态机、根据 phase 选择 `hostRole`、调用 `Role`、广播事件、记录日志，并在中断与恢复场景下保持任务过程可继续。各 phase 工件由对应 `hostRole` 维护；`Workflow` 负责消费角色返回的阶段判断结果，而不是直接生成工件内容。
 
 ## Goal
 
@@ -23,7 +23,7 @@ AegisFlow 通过 `Clarify`、`Explore`、`Plan`、`Build`、`Review`、`Test Des
 1. 作为 `default-workflow` 的核心编排对象驱动任务执行。
 2. 作为 `Runtime.TaskState` 的唯一合法修改者维护状态机。
 3. 接收 `IntakeEvent`，并将任务要求透传给对应 `Role`。
-4. 在阶段推进过程中写工件、写日志、发 `WorkflowEvent`。
+4. 在阶段推进过程中消费角色结果、写日志、发 `WorkflowEvent`。
 5. 支持中断、等待审批、恢复执行和任务结束等关键状态切换。
 6. 在 `v0.1` 范围内稳定组织 `clarify` 到 `test` 的主流程。
 
@@ -34,7 +34,7 @@ AegisFlow 通过 `Clarify`、`Explore`、`Plan`、`Build`、`Review`、`Test Des
 - `Runtime`、`ProjectConfig`、`ArtifactManager`、`EventEmitter`、`EventLogger`、`RoleRegistry` 作为 `Workflow` 直接依赖对象的描述
 - `IntakeEvent` 的接收与 `WorkflowEvent` 的发送
 - `run`、`resume`、`runPhase`、`runRole` 的职责边界
-- 工件写入、日志记录、角色调用、快照持久化、中断恢复、等待审批
+- `hostRole` 选择、日志记录、角色调用、快照持久化、中断恢复、等待审批
 
 ## Out of Scope
 
@@ -54,8 +54,8 @@ AegisFlow 通过 `Clarify`、`Explore`、`Plan`、`Build`、`Review`、`Test Des
 - `WorkflowController` 是 `Runtime.TaskState` 的唯一合法修改者
 - `WorkflowController` 会保存 `TaskState` 的快照到 md 文件
 - `WorkflowController` 接收 `Intake` 层指令
-- `WorkflowController` 会将 `Intake` 层用户要求透传给 `Role` 层具体 Agent
-- `WorkflowController` 接收 `Role` 层返回内容，并调用 `ArtifactManager` 写工件
+- `WorkflowController` 会将 `Intake` 层用户要求透传给当前 phase 的 `hostRole`
+- `WorkflowController` 接收 `Role` 层返回内容，并基于结果推进 phase 与记录工件事件
 - `WorkflowController` 写 `EventLogger` 日志
 - `WorkflowController` 更新 `TaskStatus`
 - `WorkflowController` 从 `Intake` 层接受 `IntakeEvent`，并向 `Intake` 层发送 `WorkflowEvent`
@@ -63,7 +63,7 @@ AegisFlow 通过 `Clarify`、`Explore`、`Plan`、`Build`、`Review`、`Test Des
 - `Runtime` 仅存在于内存中，但部分内容如 `TaskState` 快照会被保存到 md 中
 - `Runtime` 初始化时包含：`TaskState`、`WorkflowController`、`ProjectConfig`、`EventEmitter`、`EventLogger`、`ArtifactManager`、`RoleRegistry`
 - `Runtime` 在任务恢复时必须重新创建
-- `ProjectConfig.workflowPhases` 是 `Workflow` 的流程配置输入，`v0.1` 可以先写死
+- `ProjectConfig.workflowPhases` 是 `Workflow` 的流程配置输入；每个 phase 至少包含 `name`、`hostRole`、`needApproval`
 - `TaskState` 包含 `taskId`、`title`、`currentPhase`、`phaseStatus`、`status`、`resumeFrom?`、`updatedAt`
 - `TaskStatus` 包含：`IDLE`、`RUNNING`、`WAITING_USER_INPUT`、`WAITING_APPROVAL`、`INTERRUPTED`、`FAILED`、`COMPLETED`
 - `Phase` 包含：`clarify`、`explore`、`plan`、`build`、`review`、`test-design`、`unit-test`、`test`
@@ -80,6 +80,9 @@ AegisFlow 通过 `Clarify`、`Explore`、`Plan`、`Build`、`Review`、`Test Des
 - 恢复机制作为明确需求存在
 - 本文需要将 `TaskState`、`Phase / PhaseStatus / TaskStatus`、`Runtime`、`ProjectConfig`、`ArtifactManager`、`EventEmitter`、`EventLogger`、`RoleRegistry` 全部作为明确需求对象
 - 快照持久化到 md 文件、恢复时重建 `Runtime` 需要写成明确需求，而不只是背景说明
+- 每个 phase 的 `hostRole` 都是一个 `controller + agent` 角色，由 `ProjectConfig.workflowPhases[*].hostRole` 指定
+- `hostRole` 不负责具体生成工作，只负责围绕 `Executor` 结果做简单判断：工件是否允许落盘、phase 是否结束
+- `v0.1` 中不要求 `hostRole` 实现复杂判断；只要拿到 `Executor` 返回结果，就直接视为当前 phase 结束
 - 验收重点优先关注状态机与 phase 流转，其他能力尽量满足
 
 ## 需求总览
@@ -90,7 +93,7 @@ flowchart LR
     WF[WorkflowController]
     TS[TaskState]
     RR[RoleRegistry]
-    R[Role]
+    R[Host Role]
     AM[ArtifactManager]
     EL[EventLogger]
     EE[EventEmitter]
@@ -101,7 +104,7 @@ flowchart LR
     WF --> RR
     RR --> R
     R --> WF
-    WF --> AM
+    R --> AM
     WF --> EL
     WF --> EE
     EE --> WE
@@ -120,7 +123,7 @@ flowchart TB
     AM[ArtifactManager]
     EL[EventLogger]
     EE[EventEmitter]
-    ROLE[Host Role]
+    ROLE[Host Role Controller + Agent]
     FS[md 快照 / 工件]
 
     IA -->|IntakeEvent| WF
@@ -134,7 +137,7 @@ flowchart TB
     RT --> EE
     WF --> ROLE
     ROLE --> WF
-    WF --> AM
+    ROLE --> AM
     WF --> EL
     WF --> EE
     WF --> FS
@@ -151,7 +154,8 @@ sequenceDiagram
     participant WF as WorkflowController
     participant TS as TaskState
     participant RR as RoleRegistry
-    participant R as Role
+    participant R as Host Role
+    participant EX as Executor
     participant AM as ArtifactManager
     participant EL as EventLogger
     participant EE as EventEmitter
@@ -168,8 +172,9 @@ sequenceDiagram
         RR-->>WF: role
         WF->>EE: emit(role_start)
         WF->>R: run(input, context)
+        R->>EX: 调用统一执行器
+        EX->>AM: 更新当前 phase artifact
         R-->>WF: RoleResult
-        WF->>AM: 创建 artifact
         WF->>EE: emit(artifact_created)
         WF->>EL: log(role_end / artifact_created)
         WF->>TS: 更新 phaseStatus=DONE
@@ -314,20 +319,23 @@ flowchart LR
 ### FR-8 调用 RoleRegistry 与 Role
 
 - `WorkflowController` 必须通过 `RoleRegistry` 获取对应 `Role`。
+- `WorkflowController` 获取的角色必须是当前 phase 配置中的 `hostRole`。
 - `WorkflowController` 必须直接调用 `Role.run(input, context)`。
 - `WorkflowController` 不能绕过 `RoleRegistry` 直接承担角色职责。
 - `WorkflowController` 必须将来自 `Intake` 的任务要求透传给对应 `Role`。
 
-### FR-9 写工件
+### FR-9 工件事件与阶段推进
 
-- `WorkflowController` 必须接收 `Role` 返回结果，并调用 `ArtifactManager` 写工件。
-- 工件写入必须属于 `Workflow` 的职责边界，而不是 `Role` 自行写入。
-- 工件创建后，`Workflow` 层必须产生对应的 `artifact_created` 事件。
+- `WorkflowController` 必须接收 `Role` 返回结果，并基于结果推进 phase。
+- 当前 phase 的工件由对应 `hostRole` 维护，而不是由 `WorkflowController` 直接生成内容。
+- `WorkflowController` 必须能够基于 `RoleResult` 记录 `artifact_created` 事件。
+- 当 `RoleResult.phaseCompleted` 为 `true` 时，`WorkflowController` 必须结束当前 phase 并推进到下一 phase。
+- `v0.1` 中允许把“角色已拿到 `Executor` 结果”直接视为当前 phase 完成。
 
 ### FR-10 写日志
 
 - `WorkflowController` 必须在任务执行过程中写 `EventLogger` 日志。
-- 至少应覆盖任务开始、阶段开始、角色执行、工件生成、错误和任务结束等关键节点。
+- 至少应覆盖任务开始、阶段开始、角色执行、工件事件、错误和任务结束等关键节点。
 
 ### FR-11 快照持久化
 
@@ -360,6 +368,7 @@ flowchart LR
 - `resume(taskId, input?)` 必须用于恢复未完成任务。
 - `runPhase(phase)` 必须用于驱动单个 phase 的执行。
 - `runRole(roleName, input)` 必须用于驱动单个 role 的执行。
+- `runPhase(phase)` 必须以当前 phase 配置中的 `hostRole` 为执行主体。
 - 这四个入口需要共同覆盖“启动任务、推进 phase、执行 role、恢复任务”的完整职责闭环。
 
 ### FR-16 Runtime 与 ProjectConfig 作为明确依赖对象
@@ -373,6 +382,7 @@ flowchart LR
   - `artifactManager`
   - `roleRegistry`
 - `ProjectConfig.workflowPhases` 必须作为 `Workflow` 流程编排输入的一部分。
+- `ProjectConfig.workflowPhases` 的最小配置必须至少能表达 `name`、`hostRole`、`needApproval`。
 
 ### FR-17 EventEmitter 作为事件广播通道
 
@@ -381,7 +391,7 @@ flowchart LR
 
 ### FR-18 错误收敛
 
-- 当阶段执行失败、角色运行失败或工件写入失败时，`Workflow` 层必须能够进入失败处理路径。
+- 当阶段执行失败、角色运行失败或工件事件记录失败时，`Workflow` 层必须能够进入失败处理路径。
 - 失败时必须更新 `TaskStatus`、记录日志，并发出错误事件。
 
 ## Constraints
@@ -392,6 +402,7 @@ flowchart LR
 - 审批机制作为通用能力存在，但不绑定到某个固定 phase
 - 恢复机制必须依赖 `Runtime` 重建
 - 快照需要落到 md 文件
+- `WorkflowController` 不直接生成工件内容，而是消费当前 `hostRole` 返回的阶段结果
 - 本文只描述需求边界，不定义具体类图、文件结构和代码实现
 
 ## Acceptance
@@ -400,7 +411,8 @@ flowchart LR
 - `TaskState`、`TaskStatus`、`Phase`、`PhaseStatus` 能形成自洽的状态机和 phase 流转
 - `Workflow` 层能接收 `IntakeEvent` 并发送 `WorkflowEvent`
 - `Workflow` 层能通过 `RoleRegistry` 获取 `Role` 并执行 `run`
-- `Workflow` 层能接收 `Role` 返回内容并写入工件
+- `Workflow` 层能根据 `ProjectConfig.workflowPhases[*].hostRole` 选择当前 phase 的主持人
+- `Workflow` 层能接收 `Role` 返回内容，并基于结果推进 phase 与记录工件事件
 - `Workflow` 层能在关键节点记录日志
 - `Workflow` 层能将 `TaskState` 快照持久化到 md 文件
 - `Workflow` 层支持进入 `waiting_approval` 和 `waiting_user_input`
@@ -412,6 +424,7 @@ flowchart LR
 - 如果 `ProjectConfig.workflowPhases` 与实际角色注册关系不一致，`Workflow` 层会出现 phase 与 role 无法对齐的问题
 - 如果快照持久化时机不稳定，恢复执行可能出现状态丢失或恢复点错误
 - 如果 `waiting_user_input`、`waiting_approval`、`interrupted` 的边界处理不清晰，状态机会产生分叉歧义
+- 如果 `hostRole` 与 `Workflow` 的边界不清晰，后续实现时容易再次把工件生成逻辑塞回 `Workflow`
 - 如果 `ArtifactManager`、`EventLogger`、`EventEmitter` 的职责边界混乱，`Workflow` 层容易越界承担展示或存储细节
 
 ## Open Questions
@@ -421,4 +434,3 @@ flowchart LR
 ## Assumptions
 
 - 无
-
