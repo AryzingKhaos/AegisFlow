@@ -139,6 +139,9 @@ function buildRoleExecutionPrompt(
   input: string,
   visibleArtifacts: VisibleArtifact[],
 ): string {
+  const isClarifyFinalPrdGeneration =
+    context.phase === "clarify" && isClarifyFinalPrdGenerationInput(input);
+
   // 这里把角色职责、执行上下文、工件可见范围统一压成一份执行协议，
   // 确保不同角色虽然复用同一执行器，但仍然按各自边界工作。
   return [
@@ -181,13 +184,24 @@ function buildRoleExecutionPrompt(
     `- workflowProfileId: ${context.projectConfig.workflowProfileId}`,
     `- workflowProfileLabel: ${context.projectConfig.workflowProfileLabel}`,
     "",
-    context.phase === "clarify"
+    context.phase === "clarify" && !isClarifyFinalPrdGeneration
       ? [
           "## Clarify 特殊约束",
           "",
           "- metadata.decision 必须是 ask_next_question 或 ready_for_prd。",
           '- 当 decision=ask_next_question 时，metadata.question 必须是非空字符串，artifacts 应保持为空数组。',
           "- 当 decision=ready_for_prd 时，不要直接输出最终 PRD；由 Workflow 另起一次调用生成正式 PRD。",
+          "",
+        ].join("\n")
+      : "",
+    isClarifyFinalPrdGeneration
+      ? [
+          "## Clarify 最终 PRD 生成约束",
+          "",
+          "- 当前调用是 clarify 阶段的最终 PRD 生成轮，不是继续澄清或继续提问的判断轮。",
+          "- 你必须直接输出最终 PRD 内容到 artifacts[0]，不能要求用户额外确认，不能继续追问。",
+          "- 本轮不要返回 metadata.decision，也不要输出 ask_next_question / ready_for_prd。",
+          "- artifactReady 与 phaseCompleted 应保持允许落盘和结束阶段的语义。",
           "",
         ].join("\n")
       : "",
@@ -242,7 +256,7 @@ function buildStubRoleResult(
   executionPrompt: string,
 ): RoleResult {
   if (context.phase === "clarify") {
-    const isFinalPrdGeneration = input.includes("正式生成 PRD");
+    const isFinalPrdGeneration = isClarifyFinalPrdGenerationInput(input);
 
     if (isFinalPrdGeneration) {
       return {
@@ -342,6 +356,10 @@ function buildStubRoleResult(
       visibleArtifactKeys: visibleArtifacts.map((artifact) => artifact.key),
     },
   };
+}
+
+function isClarifyFinalPrdGenerationInput(input: string): boolean {
+  return input.includes("正式生成 PRD");
 }
 
 function parseRoleResultPayload(rawContent: string): RoleResult {

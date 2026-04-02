@@ -62,7 +62,7 @@ export async function buildRuntimeForNewTask(
     input.description,
     `${input.workflow.taskType}_task`,
   );
-  const taskId = createTaskId(title);
+  const taskId = await createNextTaskId(input.artifactDir, title);
   // Runtime 装配顺序固定为：
   // 配置 -> 基础设施 -> 初始状态 -> WorkflowController。
   // 这样恢复和新建任务都能复用同一套初始化约束。
@@ -269,6 +269,41 @@ async function validateRuntimeInput(
   }
 
   await fs.mkdir(resolvedArtifactDir, { recursive: true });
+}
+
+async function createNextTaskId(
+  artifactDir: string,
+  title: string,
+  now: Date = new Date(),
+): Promise<string> {
+  const tasksRoot = path.join(path.resolve(artifactDir), "tasks");
+  let maxSequence = 0;
+
+  try {
+    const entries = await fs.readdir(tasksRoot, { withFileTypes: true });
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) {
+        continue;
+      }
+
+      const matched = entry.name.match(/^task_\d{8}_(\d+)-/);
+
+      if (!matched) {
+        continue;
+      }
+
+      const sequence = Number(matched[1]);
+
+      if (Number.isFinite(sequence) && sequence > maxSequence) {
+        maxSequence = sequence;
+      }
+    }
+  } catch {
+    // 首次运行时 tasks 目录可能还不存在，直接从 001 开始即可。
+  }
+
+  return createTaskId(title, now, maxSequence + 1);
 }
 
 function createArtifactLookupProjectConfig(artifactDir: string): ProjectConfig {

@@ -28,7 +28,7 @@ export function createRuntimeId(now: number = Date.now()): string {
 export function createTaskId(
   title: string,
   now: Date = new Date(),
-  sequence: number = Math.floor(now.getTime() % 1000),
+  sequence: number = 1,
 ): string {
   const datePart = [
     now.getFullYear().toString().padStart(4, "0"),

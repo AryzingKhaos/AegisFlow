@@ -373,6 +373,80 @@ describe("role layer", () => {
     ]);
   });
 
+  it("builds a non-conflicting prompt for clarify final PRD generation", async () => {
+    let observedPrompt = "";
+    const projectConfig = createProjectConfig({
+      projectDir: "/tmp/project",
+      artifactDir: "/tmp/project/.aegisflow/artifacts",
+      workflow: createWorkflowSelection("bugfix"),
+      workflowPhases: [
+        {
+          name: "clarify",
+          hostRole: "clarifier",
+          needApproval: false,
+        },
+      ],
+    });
+
+    await executeRoleAgent({
+      bootstrap: {
+        executor: {
+          executorKind: "fake-codex-executor",
+          async execute({ prompt }) {
+            observedPrompt = prompt;
+
+            return JSON.stringify({
+              summary: "clarifier final prd generated",
+              artifacts: ["# Final PRD\n\ncontent"],
+            });
+          },
+        },
+        prompt: "SYSTEM_PROMPT",
+        promptSources: ["builtin/clarifier.md"],
+        promptWarnings: [],
+        config: {
+          model: "codex-5.4",
+          baseUrl: "http://localhost",
+          apiKey: "dummy",
+          executionMode: "agent",
+          sources: {
+            model: "default",
+            baseUrl: "default",
+            apiKey: "OPENAI_API_KEY",
+            executionMode: "default",
+          },
+        },
+      },
+      roleName: "clarifier",
+      executionProfile: createCapabilityProfile("clarifier"),
+      context: {
+        taskId: "task_clarify_final_prd_prompt_case",
+        phase: "clarify",
+        cwd: "/tmp/project",
+        projectConfig,
+        roleCapabilityProfile: createCapabilityProfile("clarifier"),
+        artifacts: {
+          async get() {
+            return undefined;
+          },
+          async list() {
+            return [];
+          },
+        },
+      },
+      input: [
+        "请基于当前 clarify 阶段可见的 initial requirement 与 clarify dialogue 工件，",
+        "生成最终 PRD 工件内容。",
+        "这次调用的目标是正式生成 PRD，而不是继续提问。",
+      ].join("\n"),
+    });
+
+    expect(observedPrompt).toContain("## Clarify 最终 PRD 生成约束");
+    expect(observedPrompt).toContain("你必须直接输出最终 PRD 内容到 artifacts[0]");
+    expect(observedPrompt).not.toContain("metadata.decision 必须是 ask_next_question 或 ready_for_prd。");
+    expect(observedPrompt).not.toContain("当 decision=ready_for_prd 时，不要直接输出最终 PRD");
+  });
+
   it("executes codex cli with isolated output files and returns the written content", async () => {
     const root = await createTempProject();
     const projectDir = path.join(root, "project");

@@ -1,6 +1,7 @@
 import type { EventEmitter } from "node:events";
 import type {
   ArtifactManager,
+  ArtifactReader,
   EventLogger,
   IntakeEvent,
   Phase,
@@ -124,8 +125,9 @@ export class DefaultWorkflowController implements WorkflowController {
       taskId: this.dependencies.taskState.taskId,
       phase,
       cwd: this.dependencies.projectConfig.projectDir,
-      artifacts: this.dependencies.artifactManager.createArtifactReader(
+      artifacts: this.createExecutionArtifactReader(
         this.dependencies.taskState.taskId,
+        phase,
       ),
       projectConfig: this.dependencies.projectConfig,
       roleCapabilityProfile: role.capabilityProfile,
@@ -787,6 +789,66 @@ export class DefaultWorkflowController implements WorkflowController {
     this.touchTaskState();
   }
 
+  private createExecutionArtifactReader(
+    taskId: string,
+    phase: Phase,
+  ): ArtifactReader {
+    const baseReader = this.dependencies.artifactManager.createArtifactReader(taskId);
+
+    return {
+      get: async (key: string) => {
+        const visibleKeys = await this.resolveVisibleArtifactKeys(baseReader, phase);
+        const matchedKey = matchVisibleArtifactKey(key, visibleKeys);
+
+        if (!matchedKey) {
+          return undefined;
+        }
+
+        return baseReader.get(matchedKey);
+      },
+      list: async (requestedPhase?: Phase) => {
+        const visibleKeys = await this.resolveVisibleArtifactKeys(baseReader, phase);
+
+        if (!requestedPhase) {
+          return visibleKeys;
+        }
+
+        return visibleKeys
+          .filter((key) => key.startsWith(`${requestedPhase}/`))
+          .map((key) => key.split("/", 2)[1] ?? key);
+      },
+    };
+  }
+
+  private async resolveVisibleArtifactKeys(
+    artifactReader: ArtifactReader,
+    phase: Phase,
+  ): Promise<string[]> {
+    const allKeys = await artifactReader.list();
+
+    if (phase === "clarify") {
+      return allKeys
+        .filter((key) => key.startsWith("clarify/"))
+        .sort();
+    }
+
+    const previousPhase = this.getPreviousPhaseConfig(phase);
+
+    if (!previousPhase) {
+      return [];
+    }
+
+    if (previousPhase.name === "clarify") {
+      return allKeys.includes("clarify/final-prd") ? ["clarify/final-prd"] : [];
+    }
+
+    const previousPhaseKeys = allKeys
+      .filter((key) => key.startsWith(`${previousPhase.name}/`))
+      .sort();
+
+    return previousPhaseKeys.length > 0 ? [previousPhaseKeys[0]] : [];
+  }
+
   private resolveClarifyDecision(
     roleResult: RoleResult,
   ): "ask_next_question" | "ready_for_prd" {
@@ -887,6 +949,17 @@ export class DefaultWorkflowController implements WorkflowController {
     }
 
     return phases[currentIndex + 1];
+  }
+
+  private getPreviousPhaseConfig(phase: Phase): WorkflowPhaseConfig | undefined {
+    const phases = this.dependencies.projectConfig.workflowPhases;
+    const currentIndex = phases.findIndex((item) => item.name === phase);
+
+    if (currentIndex <= 0) {
+      return undefined;
+    }
+
+    return phases[currentIndex - 1];
   }
 
   private async pushEvent(
@@ -1153,4 +1226,15 @@ function buildClarifyFinalPrdInput(): string {
     "生成最终 PRD 工件内容。",
     "这次调用的目标是正式生成 PRD，而不是继续提问。",
   ].join("\n");
+}
+
+function matchVisibleArtifactKey(
+  key: string,
+  visibleKeys: string[],
+): string | undefined {
+  if (visibleKeys.includes(key)) {
+    return key;
+  }
+
+  return visibleKeys.find((visibleKey) => visibleKey.endsWith(`/${key}`));
 }

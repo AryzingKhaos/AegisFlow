@@ -210,7 +210,7 @@ export class IntakeAgent {
           ];
         }
 
-        return ["请回答 yes/no，或输入 是/否。"];
+        return ["请回答 y/n，或输入 是/否。"];
       case "confirm_workflow_profile":
         return this.handleWorkflowProfileConfirmation(input);
       case "select_workflow":
@@ -239,7 +239,7 @@ export class IntakeAgent {
     return [
       `我理解这更像是 ${workflow.label}，将使用 ${workflow.id}。`,
       describeWorkflowGuess(workflowGuess.taskType),
-      "是不是想要这个类型？请回答 yes/no。",
+      "是不是想要这个类型？请回答 y/n。",
     ];
   }
 
@@ -547,12 +547,12 @@ export class IntakeAgent {
 
     if (isFalsyAnswer(input)) {
       return [
-        "当前版本仅支持 default-workflow/v0.1 编排。若接受该编排请输入 yes，或输入“取消任务”。",
+        "当前版本仅支持 default-workflow/v0.1 编排。若接受该编排请输入 y，或输入“取消任务”。",
       ];
     }
 
     return [
-      "请确认是否使用当前 workflow 编排。可输入 yes/no，或输入 default-v0.1。",
+      "请确认是否使用当前 workflow 编排。可输入 y/n，或输入 default-v0.1。",
     ];
   }
 
@@ -560,7 +560,7 @@ export class IntakeAgent {
     const phases = formatWorkflowPhases(
       this.draft?.workflowPhases ?? createDefaultWorkflowPhases(),
     );
-    return `当前 workflow 编排将使用 default-workflow/v0.1：${phases}。是否确认？请回答 yes/no。`;
+    return `当前 workflow 编排将使用 default-workflow/v0.1：${phases}。是否确认？请回答 y/n。`;
   }
 
   private getResumeIndexPath(): string {

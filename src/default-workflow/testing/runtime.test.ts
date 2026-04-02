@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -45,6 +45,36 @@ afterEach(async () => {
 });
 
 describe("workflow runtime", () => {
+  it("allocates task ids with max-existing-sequence plus one", async () => {
+    const root = await createTempProject();
+    const projectDir = path.join(root, "project");
+    const artifactDir = path.join(projectDir, ".aegisflow", "artifacts");
+    await mkdir(path.join(artifactDir, "tasks", "task_20260323_001-old_task"), {
+      recursive: true,
+    });
+    await mkdir(path.join(artifactDir, "tasks", "task_20260325_002-another_task"), {
+      recursive: true,
+    });
+    await mkdir(projectDir, { recursive: true });
+
+    const runtimeResult = await buildRuntimeForNewTask({
+      projectDir,
+      artifactDir,
+      workflow: createWorkflowSelection("bugfix"),
+      workflowPhases: createDefaultWorkflowPhases(),
+      description: "修复登录报错",
+    });
+
+    expect(runtimeResult.runtime.taskState.taskId).toMatch(
+      /^task_\d{8}_003-/,
+    );
+    expect(
+      (await readdir(path.join(artifactDir, "tasks"))).includes(
+        runtimeResult.runtime.taskState.taskId,
+      ),
+    ).toBe(true);
+  });
+
   it("runs phases in configured order and waits for approval at plan", async () => {
     const root = await createTempProject();
     const projectDir = path.join(root, "project");
@@ -591,6 +621,90 @@ describe("workflow runtime", () => {
     );
     const snapshot = await readFile(snapshotPath, "utf8");
     expect(snapshot).toContain("status: completed");
+  });
+
+  it("exposes only clarify final-prd to explore phase", async () => {
+    const root = await createTempProject();
+    const projectDir = path.join(root, "project");
+    const artifactDir = path.join(root, "artifacts");
+    await mkdir(projectDir, { recursive: true });
+
+    const workflowPhases: WorkflowPhaseConfig[] = [
+      {
+        name: "clarify",
+        hostRole: "clarifier",
+        needApproval: false,
+      },
+      {
+        name: "explore",
+        hostRole: "explorer",
+        needApproval: false,
+      },
+    ];
+    const projectConfig = createProjectConfig({
+      projectDir,
+      artifactDir,
+      workflow: createWorkflowSelection("feature_change"),
+      workflowPhases,
+    });
+    const artifactManager = new FileArtifactManager(projectConfig);
+    const taskState = createInitialTaskState(
+      "task_explore_visibility_case",
+      "explore_visibility_case",
+      workflowPhases,
+    );
+    await artifactManager.initializeTask(taskState.taskId);
+    await artifactManager.saveTaskContext({
+      taskId: taskState.taskId,
+      title: taskState.title,
+      description: "补齐 API 细节",
+      createdAt: Date.now(),
+      lastRuntimeId: "runtime_explore_visibility_case",
+      projectConfig,
+    });
+
+    const controller = new DefaultWorkflowController({
+      taskState,
+      projectConfig,
+      eventEmitter: new EventEmitter(),
+      eventLogger: new MemoryEventLogger(),
+      artifactManager,
+      roleRegistry: new TestRoleRegistry({
+        clarifier: createRole("clarifier", async (input) => {
+          if (input.includes("正式生成 PRD")) {
+            return {
+              summary: "clarifier:final-prd",
+              artifacts: ["# final prd\n\ncontent"],
+            };
+          }
+
+          return {
+            summary: "clarifier:ready-for-prd",
+            artifacts: [],
+            metadata: {
+              decision: "ready_for_prd",
+            },
+          };
+        }),
+        explorer: createRole("explorer", async (_input, context) => {
+          expect(await context.artifacts.list()).toEqual(["clarify/final-prd"]);
+          expect(await context.artifacts.get("clarify/final-prd")).toBe(
+            "# final prd\n\ncontent",
+          );
+          expect(await context.artifacts.get("clarify/initial-requirement")).toBeUndefined();
+          expect(await context.artifacts.get("clarify/clarify-dialogue")).toBeUndefined();
+
+          return {
+            summary: "explorer done",
+            artifacts: ["# explore artifact\n\ncontent"],
+          };
+        }),
+      }),
+    });
+
+    await controller.run(taskState.taskId, "补齐 API 细节");
+
+    expect(taskState.status).toBe(TaskStatus.COMPLETED);
   });
 
   it("fails clarify when metadata.decision is missing or invalid", async () => {
