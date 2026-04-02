@@ -83,12 +83,17 @@ export interface ProjectConfig {
 }
 
 export interface RoleExecutorConfig {
-  type: "codex-cli";
-  command: string;
-  cwd: string;
-  timeoutMs: number;
-  env: {
-    passthrough: boolean;
+  transport: {
+    type: "child_process";
+    cwd: string;
+    timeoutMs: number;
+    env: {
+      passthrough: boolean;
+    };
+  };
+  provider: {
+    type: "codex";
+    command: string;
   };
 }
 
@@ -155,6 +160,8 @@ export interface ArtifactReader {
 export interface RoleResult {
   summary: string;
   artifacts: string[];
+  artifactReady?: boolean;
+  phaseCompleted?: boolean;
   metadata?: Record<string, unknown>;
 }
 

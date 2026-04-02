@@ -5,10 +5,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { FileArtifactManager } from "../persistence/task-store";
 import { resolveRoleCodexConfig } from "../role/config";
-import {
-  CodexCliRoleAgentExecutor,
-  createPersistentCodexCliSession,
-} from "../role/executor";
+import { CodexCliRoleAgentExecutor } from "../role/executor";
 import { buildRolePrompt } from "../role/prompts";
 import { executeRoleAgent, type RoleAgentBootstrap } from "../role/model";
 import {
@@ -248,7 +245,8 @@ describe("role layer", () => {
     expect(configContent).toContain('logDir: ".aegisflow/logs"');
     expect(configContent).toContain('prototypeDir: "/Users/aaron/code/roleflow/roles"');
     expect(configContent).toContain('promptDir: ".aegisflow/roles"');
-    expect(configContent).toContain('type: "codex-cli"');
+    expect(configContent).toContain('type: "child_process"');
+    expect(configContent).toContain('type: "codex"');
     expect(configContent).toContain('command: "codex"');
     expect(configContent).toContain('cwd: "."');
     expect(configContent).toContain("timeoutMs: 300000");
@@ -675,7 +673,7 @@ describe("role layer", () => {
           },
         },
       }),
-    ).rejects.toThrow("Role Codex agent execution failed: codex exited with code 1");
+    ).rejects.toThrow("Role agent execution failed: codex exited with code 1");
   });
 
   it("resolves codex-specific role config from centralized environment variables", () => {
@@ -715,36 +713,50 @@ describe("role layer", () => {
       artifactDir: "/tmp/project/.aegisflow/artifacts",
       workflow: createWorkflowSelection("bugfix"),
       roleExecutor: {
-        command: "custom-codex",
-        cwd: ".aegisflow/runtime",
-        timeoutMs: 120000,
-        env: {
-          passthrough: false,
+        transport: {
+          cwd: ".aegisflow/runtime",
+          timeoutMs: 120000,
+          env: {
+            passthrough: false,
+          },
+        },
+        provider: {
+          command: "custom-codex",
         },
       },
     });
 
     expect(defaultConfig.roleExecutor).toEqual({
-      type: "codex-cli",
-      command: "codex",
-      cwd: "/tmp/project",
-      timeoutMs: 300000,
-      env: {
-        passthrough: true,
+      transport: {
+        type: "child_process",
+        cwd: "/tmp/project",
+        timeoutMs: 300000,
+        env: {
+          passthrough: true,
+        },
+      },
+      provider: {
+        type: "codex",
+        command: "codex",
       },
     });
     expect(customConfig.roleExecutor).toEqual({
-      type: "codex-cli",
-      command: "custom-codex",
-      cwd: "/tmp/project/.aegisflow/runtime",
-      timeoutMs: 120000,
-      env: {
-        passthrough: false,
+      transport: {
+        type: "child_process",
+        cwd: "/tmp/project/.aegisflow/runtime",
+        timeoutMs: 120000,
+        env: {
+          passthrough: false,
+        },
+      },
+      provider: {
+        type: "codex",
+        command: "custom-codex",
       },
     });
   });
 
-  it("reuses the same codex cli session for repeated runs of the same role", async () => {
+  it("keeps repeated codex executions in one-shot mode without resume semantics", async () => {
     const root = await createTempProject();
     const projectDir = path.join(root, "project");
     await mkdir(projectDir, { recursive: true });
@@ -836,156 +848,13 @@ describe("role layer", () => {
     expect(observedArgs[0]).not.toContain("-");
     expect(observedArgs[0]).toContain('-c');
     expect(observedArgs[0]).toContain('openai_base_url="https://api.openai.com/v1"');
-    expect(observedArgs[1].slice(0, 2)).toEqual(["exec", "resume"]);
-    expect(observedArgs[1]).toContain("session-builder-1");
+    expect(observedArgs[1][0]).toBe("exec");
+    expect(observedArgs[1]).not.toContain("resume");
+    expect(observedArgs[1]).not.toContain("session-builder-1");
     expect(observedArgs[1].at(-1)).toBe("SECOND_PROMPT");
     expect(observedArgs[1]).not.toContain("-");
     expect(observedArgs[1]).toContain('-c');
     expect(observedArgs[1]).toContain('openai_base_url="https://api.openai.com/v1"');
-  });
-
-  it("reuses the same persistent PTY session instance across repeated executions", async () => {
-    const root = await createTempProject();
-    const projectDir = path.join(root, "project");
-    await mkdir(projectDir, { recursive: true });
-
-    const observedCommands: string[][] = [];
-    const forwardedInputs: string[] = [];
-    let sessionCreateCount = 0;
-    const executor = new CodexCliRoleAgentExecutor({
-      createPersistentSession() {
-        sessionCreateCount += 1;
-
-        return {
-          async executeCommand(_file, args, options) {
-            observedCommands.push(args);
-            options.onStdoutLine?.('{"type":"thread.started","thread_id":"session-builder-1"}');
-            const outputPath = args[args.indexOf("--output-last-message") + 1];
-            await writeFile(
-              outputPath,
-              JSON.stringify({
-                summary: `result-${observedCommands.length}`,
-                artifacts: [],
-              }),
-              "utf8",
-            );
-          },
-          async sendInput(input: string) {
-            forwardedInputs.push(input);
-            return {
-              accepted: true,
-              mode: "queued" as const,
-            };
-          },
-          async shutdown() {
-            return;
-          },
-        };
-      },
-    });
-
-    const context = {
-      taskId: "task_persistent_pty_case",
-      phase: "build" as const,
-      cwd: projectDir,
-      projectConfig: createProjectConfig({
-        projectDir,
-        artifactDir: path.join(root, "artifacts"),
-        workflow: createWorkflowSelection("bugfix"),
-      }),
-      roleCapabilityProfile: createCapabilityProfile("builder"),
-      artifacts: {
-        async get() {
-          return undefined;
-        },
-        async list() {
-          return [];
-        },
-      },
-    };
-
-    await executor.execute({
-      roleName: "builder",
-      prompt: "FIRST_PROMPT",
-      context,
-      executionProfile: createCapabilityProfile("builder"),
-      config: {
-        model: "codex-5.4",
-        baseUrl: "https://api.openai.com/v1",
-        apiKey: "dummy",
-        executionMode: "agent",
-        sources: {
-          model: "default",
-          baseUrl: "default",
-          apiKey: "OPENAI_API_KEY",
-          executionMode: "default",
-        },
-      },
-    });
-
-    await executor.execute({
-      roleName: "builder",
-      prompt: "SECOND_PROMPT",
-      context,
-      executionProfile: createCapabilityProfile("builder"),
-      config: {
-        model: "codex-5.4",
-        baseUrl: "https://api.openai.com/v1",
-        apiKey: "dummy",
-        executionMode: "agent",
-        sources: {
-          model: "default",
-          baseUrl: "default",
-          apiKey: "OPENAI_API_KEY",
-          executionMode: "default",
-        },
-      },
-    });
-
-    const delivery = await executor.sendInput?.("补充说明");
-
-    expect(sessionCreateCount).toBe(1);
-    expect(observedCommands).toHaveLength(2);
-    expect(forwardedInputs).toEqual(["补充说明"]);
-    expect(delivery).toEqual({
-      accepted: true,
-      mode: "queued",
-    });
-  });
-
-  it("marks the persistent PTY session unavailable after idle shell exit", async () => {
-    const terminal = new FakeNodePtyTerminal();
-    const session = createPersistentCodexCliSession({
-      nodePtyModule: {
-        spawn() {
-          return terminal;
-        },
-      },
-      shell: {
-        file: "/bin/sh",
-        args: [],
-      },
-      env: {},
-    });
-
-    terminal.emitExit({ exitCode: 1 });
-
-    await expect(
-      session.executeCommand("codex", ["exec"], {
-        cwd: "/tmp",
-        input: "",
-        env: {},
-        timeoutMs: 100,
-      }),
-    ).rejects.toThrow("codex PTY session exited unexpectedly");
-
-    await expect(session.sendInput("补充说明")).resolves.toEqual({
-      accepted: false,
-      mode: "rejected",
-      reason: "session_unavailable",
-    });
-
-    await expect(session.shutdown()).resolves.toBeUndefined();
   });
 
   it("passes read-only ExecutionContext into roles and persists string artifacts", async () => {
@@ -996,8 +865,8 @@ describe("role layer", () => {
 
     const workflowPhases: WorkflowPhaseConfig[] = [
       {
-        name: "clarify",
-        hostRole: "clarifier",
+        name: "explore",
+        hostRole: "explorer",
         needApproval: false,
       },
     ];
@@ -1031,14 +900,14 @@ describe("role layer", () => {
       eventLogger: new MemoryEventLogger(),
       artifactManager,
       roleRegistry: new InlineRoleRegistry({
-        clarifier: createRole("clarifier", async (_input, context) => {
+        explorer: createRole("explorer", async (_input, context) => {
           observedContext = context as unknown as Record<string, unknown>;
           expect(await context.artifacts.list()).toEqual([]);
           expect(context.roleCapabilityProfile.sideEffects).toBe("forbidden");
 
           return {
-            summary: "clarifier done",
-            artifacts: ["# clarify artifact\n\ncontent"],
+            summary: "explorer done",
+            artifacts: ["# explore artifact\n\ncontent"],
           };
         }),
       }),
@@ -1059,11 +928,11 @@ describe("role layer", () => {
       "tasks",
       taskState.taskId,
       "artifacts",
-      "clarify",
-      "clarify-clarifier-1.md",
+      "explore",
+      "explore-explorer-1.md",
     );
     const artifactContent = await readFile(artifactPath, "utf8");
-    expect(artifactContent).toBe("# clarify artifact\n\ncontent");
+    expect(artifactContent).toBe("# explore artifact\n\ncontent");
   });
 });
 

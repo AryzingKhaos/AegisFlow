@@ -3,7 +3,6 @@ import path from "node:path";
 import type { EventEmitter } from "node:events";
 import type {
   EventLogger,
-  InputDeliveryResult,
   ProjectConfig,
   Role,
   RoleCapabilityProfile,
@@ -97,27 +96,6 @@ export class DefaultRoleRegistry implements RoleRegistry {
 
   public getActiveRoleName(): RoleName | undefined {
     return this.activeRoleName;
-  }
-
-  public async sendInputToActiveRole(input: string): Promise<InputDeliveryResult> {
-    if (!this.activeRoleName) {
-      return {
-        accepted: false,
-        mode: "rejected",
-        reason: "no_active_role",
-      };
-    }
-
-    // Intake 运行态输入只允许落到当前 active role。
-    // 如果实例尚未创建，这里会按 activeRoleName 懒创建对应 role。
-    const role = this.roleInstances.get(this.activeRoleName) ?? this.get(this.activeRoleName);
-    return (
-      (await role.sendInput?.(input)) ?? {
-        accepted: false,
-        mode: "rejected",
-        reason: "executor_unavailable",
-      }
-    );
   }
 
   public list(): string[] {
@@ -230,19 +208,6 @@ function createDefaultRoleDefinition(
             context,
             input,
           });
-        },
-        async sendInput(input) {
-          // 运行中补充输入也必须复用同一个角色 bootstrap，
-          // 这样 prompt、executor、sessionId 才能保持在同一条 role 会话链上。
-          const bootstrap = await ensureBootstrap();
-
-          return (
-            (await bootstrap.executor.sendInput?.(input)) ?? {
-              accepted: false,
-              mode: "rejected",
-              reason: "executor_unavailable",
-            }
-          );
         },
         async dispose() {
           if (!bootstrapPromise) {

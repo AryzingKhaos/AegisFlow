@@ -108,7 +108,10 @@ export function createProjectConfig(input: {
   workflowProfileLabel?: string;
   targetProjectRolePromptPath?: string;
   rolePromptOverrides?: Partial<Record<RoleName, string>>;
-  roleExecutor?: Partial<RoleExecutorConfig>;
+  roleExecutor?: {
+    transport?: Partial<RoleExecutorConfig["transport"]>;
+    provider?: Partial<RoleExecutorConfig["provider"]>;
+  };
 }): ProjectConfig {
   const resolvedProjectDir = path.resolve(input.projectDir);
 
@@ -140,15 +143,24 @@ export function createProjectConfig(input: {
 
 export function createRoleExecutorConfig(
   projectDir: string,
-  input?: Partial<RoleExecutorConfig>,
+  input?: {
+    transport?: Partial<RoleExecutorConfig["transport"]>;
+    provider?: Partial<RoleExecutorConfig["provider"]>;
+  },
 ): RoleExecutorConfig {
   return {
-    type: "codex-cli",
-    command: input?.command ?? DEFAULT_ROLE_EXECUTOR_COMMAND,
-    cwd: path.resolve(projectDir, input?.cwd ?? projectDir),
-    timeoutMs: input?.timeoutMs ?? DEFAULT_ROLE_EXECUTOR_TIMEOUT_MS,
-    env: {
-      passthrough: input?.env?.passthrough ?? true,
+    transport: {
+      type: "child_process",
+      cwd: path.resolve(projectDir, input?.transport?.cwd ?? projectDir),
+      timeoutMs:
+        input?.transport?.timeoutMs ?? DEFAULT_ROLE_EXECUTOR_TIMEOUT_MS,
+      env: {
+        passthrough: input?.transport?.env?.passthrough ?? true,
+      },
+    },
+    provider: {
+      type: "codex",
+      command: input?.provider?.command ?? DEFAULT_ROLE_EXECUTOR_COMMAND,
     },
   };
 }

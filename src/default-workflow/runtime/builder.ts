@@ -14,6 +14,7 @@ import {
 import type {
   PersistedTaskContext,
   ProjectConfig,
+  RoleExecutorConfig,
   Runtime,
   WorkflowPhaseConfig,
   WorkflowSelection,
@@ -40,6 +41,11 @@ export interface RuntimeBuildResult {
   persistedContext: PersistedTaskContext;
   capabilityWarnings: string[];
 }
+
+type PartialRoleExecutorConfig = {
+  transport?: Partial<RoleExecutorConfig["transport"]>;
+  provider?: Partial<RoleExecutorConfig["provider"]>;
+};
 
 export async function buildRuntimeForNewTask(
   input: BuildNewRuntimeInput,
@@ -275,7 +281,7 @@ function createArtifactLookupProjectConfig(artifactDir: string): ProjectConfig {
 
 async function resolveProjectRoleExecutorConfig(
   projectDir: string,
-): Promise<Partial<ProjectConfig["roleExecutor"]> | undefined> {
+): Promise<PartialRoleExecutorConfig | undefined> {
   const yamlOverride = await loadRoleExecutorConfigFromYaml(projectDir);
 
   if (!yamlOverride) {
@@ -287,7 +293,7 @@ async function resolveProjectRoleExecutorConfig(
 
 async function loadRoleExecutorConfigFromYaml(
   projectDir: string,
-): Promise<Partial<ProjectConfig["roleExecutor"]> | undefined> {
+): Promise<PartialRoleExecutorConfig | undefined> {
   const configPath = path.join(
     path.resolve(projectDir),
     ".aegisflow",
@@ -304,11 +310,12 @@ async function loadRoleExecutorConfigFromYaml(
 
 function parseRoleExecutorConfig(
   content: string,
-): Partial<ProjectConfig["roleExecutor"]> | undefined {
-  const result: Partial<ProjectConfig["roleExecutor"]> = {};
+): PartialRoleExecutorConfig | undefined {
+  const result: PartialRoleExecutorConfig = {};
   let inRolesBlock = false;
   let inExecutorBlock = false;
-  let inEnvBlock = false;
+  let executorChildBlock: "transport" | "provider" | undefined;
+  let inTransportEnvBlock = false;
 
   for (const rawLine of content.split(/\r?\n/u)) {
     const trimmedLine = rawLine.trim();
@@ -322,7 +329,8 @@ function parseRoleExecutorConfig(
     if (indent === 0) {
       inRolesBlock = trimmedLine === "roles:";
       inExecutorBlock = false;
-      inEnvBlock = false;
+      executorChildBlock = undefined;
+      inTransportEnvBlock = false;
       continue;
     }
 
@@ -331,7 +339,8 @@ function parseRoleExecutorConfig(
     }
 
     if (indent === 2) {
-      inEnvBlock = false;
+      executorChildBlock = undefined;
+      inTransportEnvBlock = false;
       inExecutorBlock = trimmedLine === "executor:";
       continue;
     }
@@ -341,9 +350,74 @@ function parseRoleExecutorConfig(
     }
 
     if (indent === 4) {
-      inEnvBlock = trimmedLine === "env:";
+      executorChildBlock = undefined;
+      inTransportEnvBlock = false;
 
-      if (inEnvBlock) {
+      if (trimmedLine === "transport:") {
+        executorChildBlock = "transport";
+        result.transport = {
+          type: "child_process",
+          ...(result.transport ?? {}),
+        };
+        continue;
+      }
+
+      if (trimmedLine === "provider:") {
+        executorChildBlock = "provider";
+        result.provider = {
+          type: "codex",
+          ...(result.provider ?? {}),
+        };
+        continue;
+      }
+
+      const keyValue = splitYamlKeyValue(trimmedLine);
+
+      if (!keyValue) {
+        continue;
+      }
+
+      const value = parseYamlScalar(keyValue.value);
+
+      switch (keyValue.key) {
+        case "command":
+          if (typeof value === "string") {
+            result.provider = {
+              type: "codex",
+              ...(result.provider ?? {}),
+              command: value,
+            };
+          }
+          break;
+        case "cwd":
+          if (typeof value === "string") {
+            result.transport = {
+              type: "child_process",
+              ...(result.transport ?? {}),
+              cwd: value,
+            };
+          }
+          break;
+        case "timeoutMs":
+          if (typeof value === "number") {
+            result.transport = {
+              type: "child_process",
+              ...(result.transport ?? {}),
+              timeoutMs: value,
+            };
+          }
+          break;
+        default:
+          break;
+      }
+
+      continue;
+    }
+
+    if (indent === 6 && executorChildBlock === "transport") {
+      inTransportEnvBlock = trimmedLine === "env:";
+
+      if (inTransportEnvBlock) {
         continue;
       }
 
@@ -357,23 +431,29 @@ function parseRoleExecutorConfig(
 
       switch (keyValue.key) {
         case "type":
-          if (value === "codex-cli") {
-            result.type = "codex-cli";
-          }
-          break;
-        case "command":
-          if (typeof value === "string") {
-            result.command = value;
+          if (value === "child_process") {
+            result.transport = {
+              type: "child_process",
+              ...(result.transport ?? {}),
+            };
           }
           break;
         case "cwd":
           if (typeof value === "string") {
-            result.cwd = value;
+            result.transport = {
+              type: "child_process",
+              ...(result.transport ?? {}),
+              cwd: value,
+            };
           }
           break;
         case "timeoutMs":
           if (typeof value === "number") {
-            result.timeoutMs = value;
+            result.transport = {
+              type: "child_process",
+              ...(result.transport ?? {}),
+              timeoutMs: value,
+            };
           }
           break;
         default:
@@ -383,7 +463,41 @@ function parseRoleExecutorConfig(
       continue;
     }
 
-    if (inEnvBlock && indent === 6) {
+    if (indent === 6 && executorChildBlock === "provider") {
+      const keyValue = splitYamlKeyValue(trimmedLine);
+
+      if (!keyValue) {
+        continue;
+      }
+
+      const value = parseYamlScalar(keyValue.value);
+
+      switch (keyValue.key) {
+        case "type":
+          if (value === "codex") {
+            result.provider = {
+              type: "codex",
+              ...(result.provider ?? {}),
+            };
+          }
+          break;
+        case "command":
+          if (typeof value === "string") {
+            result.provider = {
+              type: "codex",
+              ...(result.provider ?? {}),
+              command: value,
+            };
+          }
+          break;
+        default:
+          break;
+      }
+
+      continue;
+    }
+
+    if (inTransportEnvBlock && indent === 8) {
       const keyValue = splitYamlKeyValue(trimmedLine);
 
       if (!keyValue) {
@@ -393,9 +507,13 @@ function parseRoleExecutorConfig(
       const value = parseYamlScalar(keyValue.value);
 
       if (keyValue.key === "passthrough" && typeof value === "boolean") {
-        result.env = {
-          ...(result.env ?? {}),
-          passthrough: value,
+        result.transport = {
+          type: "child_process",
+          ...(result.transport ?? {}),
+          env: {
+            ...(result.transport?.env ?? {}),
+            passthrough: value,
+          },
         };
       }
     }

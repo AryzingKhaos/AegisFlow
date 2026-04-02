@@ -142,24 +142,24 @@ flowchart TD
 
 ## Todolist (todoList)
 
-- [ ] 盘点 `src/default-workflow/role/executor.ts` 中所有默认依赖 `node-pty`、长期 session、`sessionId` 或 follow-up input 队列的实现点，并标记哪些需要迁移为 retained implementation。
-- [ ] 设计并落地最小 `child_process` transport 抽象，明确启动命令、stdin/stdout/stderr 收集、超时处理和退出码错误包装边界。
-- [ ] 设计并落地最小 CLI provider 抽象，至少覆盖 `codex` provider 的命令拼接、prompt 注入、输出读取和 provider 级结果解析。
-- [ ] 调整 `RoleAgentExecutor`、`RoleExecutorConfig`、`ProjectConfig` 及相关装配接口，显式区分 transport 与 provider，避免继续把 `codex-cli` 当成唯一执行器类型。
-- [ ] 更新 `.aegisflow/aegisproject.yaml` 解析链路与默认值生成逻辑，使 builder 能读取并归一化 transport/provider 相关配置。
-- [ ] 将当前默认主执行链路切换到新的 `child_process` transport，并保证非 `clarify` 阶段的 `runRole` 语义变成 one-shot 调用。
-- [ ] 整理现有 `node-pty` 代码到明确的保留目录或保留模块边界，并移除当前主链路对其默认引用。
-- [ ] 为非 `clarify` 阶段定义显式的 artifact-driven context 组装规则，确保 prompt 只依赖当前输入与可见工件，而不是隐含依赖 CLI 进程记忆。
-- [ ] 收敛 `sendInput` 与运行中参与语义，明确在默认 one-shot 模型下哪些输入仍允许进入当前 phase，哪些需要回到工件驱动或恢复链路处理。
-- [ ] 为 `RoleResult` 或其 `metadata` 定义最小宿主判断契约，至少稳定表达 `artifactReady` 与 `phaseCompleted`。
-- [ ] 为 `clarify` 阶段落地独立的 `initial-requirement` 工件保存策略，保证“最初需求”与问答工件、最终 PRD 工件分离存储，且后续轮次不会覆盖原始语义。
-- [ ] 为 `clarify` 阶段新增专用问答工件文件，并实现每轮问题与回答的顺序追加写入。
-- [ ] 按本计划中的推荐方案落地 `clarifier` one-shot 结果的结构化约定，至少稳定表达“继续提问”与“进入最终 PRD 生成”两种状态，以及必要的问题内容字段。
-- [ ] 新增 `runClarifyPhase()` 或等价显式分支，使 `clarify` 的多轮 one-shot 循环不污染普通 phase 的执行模型。
-- [ ] 扩展 `WorkflowController`，使其只负责读取 `clarifier` 的结构化结论并做路由：继续追问、等待用户回答，或触发最终 PRD 生成。
-- [ ] 为 `clarify` 的中断恢复补齐状态约定与恢复实现，确保恢复只依赖 `initial-requirement`、问答工件和 `resumeFrom.currentStep`，而不是依赖半途 CLI 进程状态。
-- [ ] 实现 `clarify` 结束后的最终 PRD 生成调用，并将结果保存为 `clarify` 阶段最终 PRD 工件。
-- [ ] 校对 artifact 命名与保存策略，确保非 `clarify` 仍遵守单主工件原则，而 `clarify` 允许问答工件与最终 PRD 并存。
-- [ ] 添加或更新测试，覆盖 transport/provider 分层、默认 `child_process` 执行、旧 `node-pty` 不再被主链路引用、`clarify` 问答追加写入、以及最终 PRD 生成链路。
-- [ ] 更新相关文档与配置示例，至少同步角色执行模型描述、`.aegisflow/aegisproject.yaml` 的 transport/provider 配置表达，以及与旧 `node-pty` 默认路径相关的文档表述。
-- [ ] 完成自检，确认本次改造没有让 `hostRole` 越权承担 CLI 协议细节，也没有把 `clarify` 再次退化成普通单轮 phase。
+- [x] 盘点 `src/default-workflow/role/executor.ts` 中所有默认依赖 `node-pty`、长期 session、`sessionId` 或 follow-up input 队列的实现点，并标记哪些需要迁移为 retained implementation。
+- [x] 设计并落地最小 `child_process` transport 抽象，明确启动命令、stdin/stdout/stderr 收集、超时处理和退出码错误包装边界。
+- [x] 设计并落地最小 CLI provider 抽象，至少覆盖 `codex` provider 的命令拼接、prompt 注入、输出读取和 provider 级结果解析。
+- [x] 调整 `RoleAgentExecutor`、`RoleExecutorConfig`、`ProjectConfig` 及相关装配接口，显式区分 transport 与 provider，避免继续把 `codex-cli` 当成唯一执行器类型。
+- [x] 更新 `.aegisflow/aegisproject.yaml` 解析链路与默认值生成逻辑，使 builder 能读取并归一化 transport/provider 相关配置。
+- [x] 将当前默认主执行链路切换到新的 `child_process` transport，并保证非 `clarify` 阶段的 `runRole` 语义变成 one-shot 调用。
+- [x] 整理现有 `node-pty` 代码到明确的保留目录或保留模块边界，并移除当前主链路对其默认引用。
+- [x] 为非 `clarify` 阶段定义显式的 artifact-driven context 组装规则，确保 prompt 只依赖当前输入与可见工件，而不是隐含依赖 CLI 进程记忆。
+- [x] 收敛 `sendInput` 与运行中参与语义，明确在默认 one-shot 模型下哪些输入仍允许进入当前 phase，哪些需要回到工件驱动或恢复链路处理。
+- [x] 为 `RoleResult` 或其 `metadata` 定义最小宿主判断契约，至少稳定表达 `artifactReady` 与 `phaseCompleted`。
+- [x] 为 `clarify` 阶段落地独立的 `initial-requirement` 工件保存策略，保证“最初需求”与问答工件、最终 PRD 工件分离存储，且后续轮次不会覆盖原始语义。
+- [x] 为 `clarify` 阶段新增专用问答工件文件，并实现每轮问题与回答的顺序追加写入。
+- [x] 按本计划中的推荐方案落地 `clarifier` one-shot 结果的结构化约定，至少稳定表达“继续提问”与“进入最终 PRD 生成”两种状态，以及必要的问题内容字段。
+- [x] 新增 `runClarifyPhase()` 或等价显式分支，使 `clarify` 的多轮 one-shot 循环不污染普通 phase 的执行模型。
+- [x] 扩展 `WorkflowController`，使其只负责读取 `clarifier` 的结构化结论并做路由：继续追问、等待用户回答，或触发最终 PRD 生成。
+- [x] 为 `clarify` 的中断恢复补齐状态约定与恢复实现，确保恢复只依赖 `initial-requirement`、问答工件和 `resumeFrom.currentStep`，而不是依赖半途 CLI 进程状态。
+- [x] 实现 `clarify` 结束后的最终 PRD 生成调用，并将结果保存为 `clarify` 阶段最终 PRD 工件。
+- [x] 校对 artifact 命名与保存策略，确保非 `clarify` 仍遵守单主工件原则，而 `clarify` 允许问答工件与最终 PRD 并存。
+- [x] 添加或更新测试，覆盖 transport/provider 分层、默认 `child_process` 执行、旧 `node-pty` 不再被主链路引用、`clarify` 问答追加写入、以及最终 PRD 生成链路。
+- [x] 更新相关文档与配置示例，至少同步角色执行模型描述、`.aegisflow/aegisproject.yaml` 的 transport/provider 配置表达，以及与旧 `node-pty` 默认路径相关的文档表述。
+- [x] 完成自检，确认本次改造没有让 `hostRole` 越权承担 CLI 协议细节，也没有把 `clarify` 再次退化成普通单轮 phase。

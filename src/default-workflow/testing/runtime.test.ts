@@ -154,12 +154,15 @@ describe("workflow runtime", () => {
         "roles:",
         '  prototypeDir: "/tmp/roles"',
         "  executor:",
-        '    type: "codex-cli"',
-        '    command: "custom-codex"',
-        '    cwd: "workspace/runtime"',
-        "    timeoutMs: 123456",
-        "    env:",
-        "      passthrough: false",
+        "    transport:",
+        '      type: "child_process"',
+        '      cwd: "workspace/runtime"',
+        "      timeoutMs: 123456",
+        "      env:",
+        "        passthrough: false",
+        "    provider:",
+        '      type: "codex"',
+        '      command: "custom-codex"',
         "",
       ].join("\n"),
       "utf8",
@@ -174,12 +177,17 @@ describe("workflow runtime", () => {
     });
 
     expect(runtimeResult.runtime.projectConfig.roleExecutor).toEqual({
-      type: "codex-cli",
-      command: "custom-codex",
-      cwd: path.join(projectDir, "workspace/runtime"),
-      timeoutMs: 123456,
-      env: {
-        passthrough: false,
+      transport: {
+        type: "child_process",
+        cwd: path.join(projectDir, "workspace/runtime"),
+        timeoutMs: 123456,
+        env: {
+          passthrough: false,
+        },
+      },
+      provider: {
+        type: "codex",
+        command: "custom-codex",
       },
     });
   });
@@ -196,12 +204,15 @@ describe("workflow runtime", () => {
       [
         "roles:",
         "  executor:",
-        '    type: "codex-cli"',
-        '    command: "codex-first"',
-        '    cwd: "."',
-        "    timeoutMs: 1000",
-        "    env:",
-        "      passthrough: true",
+        "    transport:",
+        '      type: "child_process"',
+        '      cwd: "."',
+        "      timeoutMs: 1000",
+        "      env:",
+        "        passthrough: true",
+        "    provider:",
+        '      type: "codex"',
+        '      command: "codex-first"',
         "",
       ].join("\n"),
       "utf8",
@@ -220,12 +231,15 @@ describe("workflow runtime", () => {
       [
         "roles:",
         "  executor:",
-        '    type: "codex-cli"',
-        '    command: "codex-second"',
-        '    cwd: "runtime/override"',
-        "    timeoutMs: 2000",
-        "    env:",
-        "      passthrough: false",
+        "    transport:",
+        '      type: "child_process"',
+        '      cwd: "runtime/override"',
+        "      timeoutMs: 2000",
+        "      env:",
+        "        passthrough: false",
+        "    provider:",
+        '      type: "codex"',
+        '      command: "codex-second"',
         "",
       ].join("\n"),
       "utf8",
@@ -237,12 +251,17 @@ describe("workflow runtime", () => {
     });
 
     expect(resumedRuntimeResult.runtime.projectConfig.roleExecutor).toEqual({
-      type: "codex-cli",
-      command: "codex-second",
-      cwd: path.join(projectDir, "runtime/override"),
-      timeoutMs: 2000,
-      env: {
-        passthrough: false,
+      transport: {
+        type: "child_process",
+        cwd: path.join(projectDir, "runtime/override"),
+        timeoutMs: 2000,
+        env: {
+          passthrough: false,
+        },
+      },
+      provider: {
+        type: "codex",
+        command: "codex-second",
       },
     });
   });
@@ -259,12 +278,15 @@ describe("workflow runtime", () => {
       [
         "roles:",
         "  executor:",
-        '    type: "codex-cli"',
-        '    command: "codex-custom"',
-        '    cwd: "runtime/custom"',
-        "    timeoutMs: 2000",
-        "    env:",
-        "      passthrough: false",
+        "    transport:",
+        '      type: "child_process"',
+        '      cwd: "runtime/custom"',
+        "      timeoutMs: 2000",
+        "      env:",
+        "        passthrough: false",
+        "    provider:",
+        '      type: "codex"',
+        '      command: "codex-custom"',
         "",
       ].join("\n"),
       "utf8",
@@ -294,21 +316,31 @@ describe("workflow runtime", () => {
     });
 
     expect(resumedRuntimeResult.runtime.projectConfig.roleExecutor).toEqual({
-      type: "codex-cli",
-      command: "codex",
-      cwd: projectDir,
-      timeoutMs: 300000,
-      env: {
-        passthrough: true,
+      transport: {
+        type: "child_process",
+        cwd: projectDir,
+        timeoutMs: 300000,
+        env: {
+          passthrough: true,
+        },
+      },
+      provider: {
+        type: "codex",
+        command: "codex",
       },
     });
     expect(resumedRuntimeResult.persistedContext.projectConfig.roleExecutor).toEqual({
-      type: "codex-cli",
-      command: "codex",
-      cwd: projectDir,
-      timeoutMs: 300000,
-      env: {
-        passthrough: true,
+      transport: {
+        type: "child_process",
+        cwd: projectDir,
+        timeoutMs: 300000,
+        env: {
+          passthrough: true,
+        },
+      },
+      provider: {
+        type: "codex",
+        command: "codex",
       },
     });
   });
@@ -505,9 +537,22 @@ describe("workflow runtime", () => {
           placeholder: false,
           capabilityProfile: createCapabilityProfile("clarifier"),
           async run(input: string, context: ExecutionContext): Promise<RoleResult> {
+            if (input.includes("正式生成 PRD")) {
+              return {
+                summary: "clarifier:final-prd",
+                artifacts: ["# final prd\n\ncontent"],
+                metadata: {
+                  decision: "final_prd_generated",
+                },
+              };
+            }
+
             return {
               summary: `clarifier:${input}`,
-              artifacts: [`# clarify-result\n\nphase=${context.phase}\n\n${input}`],
+              artifacts: [],
+              metadata: {
+                decision: "ready_for_prd",
+              },
             };
           },
         },
@@ -548,7 +593,150 @@ describe("workflow runtime", () => {
     expect(snapshot).toContain("status: completed");
   });
 
-  it("routes participate input to the active role while task is running", async () => {
+  it("fails clarify when metadata.decision is missing or invalid", async () => {
+    const root = await createTempProject();
+    const projectDir = path.join(root, "project");
+    const artifactDir = path.join(root, "artifacts");
+    await mkdir(projectDir, { recursive: true });
+
+    const workflowPhases: WorkflowPhaseConfig[] = [
+      {
+        name: "clarify",
+        hostRole: "clarifier",
+        needApproval: false,
+      },
+    ];
+    const projectConfig = createProjectConfig({
+      projectDir,
+      artifactDir,
+      workflow: createWorkflowSelection("feature_change"),
+      workflowPhases,
+    });
+    const artifactManager = new FileArtifactManager(projectConfig);
+    const taskState = createInitialTaskState(
+      "task_clarify_invalid_decision",
+      "clarify_invalid_decision",
+      workflowPhases,
+    );
+    await artifactManager.initializeTask(taskState.taskId);
+    await artifactManager.saveTaskContext({
+      taskId: taskState.taskId,
+      title: taskState.title,
+      description: "补齐 API 细节",
+      createdAt: Date.now(),
+      lastRuntimeId: "runtime_clarify_invalid_decision",
+      projectConfig,
+    });
+
+    const controller = new DefaultWorkflowController({
+      taskState,
+      projectConfig,
+      eventEmitter: new EventEmitter(),
+      eventLogger: new MemoryEventLogger(),
+      artifactManager,
+      roleRegistry: new TestRoleRegistry({
+        clarifier: createRole("clarifier", async () => ({
+          summary: "clarifier returned invalid decision",
+          artifacts: [],
+          metadata: {
+            decision: "done",
+          },
+        })),
+      }),
+    });
+
+    const events = await controller.run(taskState.taskId, "补齐 API 细节");
+
+    expect(taskState.status).toBe(TaskStatus.FAILED);
+    expect(events.at(-2)?.type).toBe("error");
+    expect(events.at(-2)?.metadata?.error).toContain(
+      "metadata.decision as ask_next_question or ready_for_prd",
+    );
+  });
+
+  it("fails clarify when final PRD generation does not return a writable artifact", async () => {
+    const root = await createTempProject();
+    const projectDir = path.join(root, "project");
+    const artifactDir = path.join(root, "artifacts");
+    await mkdir(projectDir, { recursive: true });
+
+    const workflowPhases: WorkflowPhaseConfig[] = [
+      {
+        name: "clarify",
+        hostRole: "clarifier",
+        needApproval: false,
+      },
+    ];
+    const projectConfig = createProjectConfig({
+      projectDir,
+      artifactDir,
+      workflow: createWorkflowSelection("feature_change"),
+      workflowPhases,
+    });
+    const artifactManager = new FileArtifactManager(projectConfig);
+    const taskState = createInitialTaskState(
+      "task_clarify_invalid_final_prd",
+      "clarify_invalid_final_prd",
+      workflowPhases,
+    );
+    await artifactManager.initializeTask(taskState.taskId);
+    await artifactManager.saveTaskContext({
+      taskId: taskState.taskId,
+      title: taskState.title,
+      description: "补齐 API 细节",
+      createdAt: Date.now(),
+      lastRuntimeId: "runtime_clarify_invalid_final_prd",
+      projectConfig,
+    });
+
+    let callCount = 0;
+    const controller = new DefaultWorkflowController({
+      taskState,
+      projectConfig,
+      eventEmitter: new EventEmitter(),
+      eventLogger: new MemoryEventLogger(),
+      artifactManager,
+      roleRegistry: new TestRoleRegistry({
+        clarifier: createRole("clarifier", async () => {
+          callCount += 1;
+
+          if (callCount === 1) {
+            return {
+              summary: "clarifier ready for prd",
+              artifacts: [],
+              metadata: {
+                decision: "ready_for_prd",
+              },
+            };
+          }
+
+          return {
+            summary: "final prd generation returned summary only",
+            artifacts: [],
+            artifactReady: false,
+            phaseCompleted: true,
+            metadata: {
+              decision: "final_prd_generated",
+            },
+          };
+        }),
+      }),
+    });
+
+    const events = await controller.run(taskState.taskId, "补齐 API 细节");
+
+    expect(taskState.status).toBe(TaskStatus.FAILED);
+    expect(
+      events.some(
+        (event) =>
+          event.type === "artifact_created" &&
+          event.metadata?.artifactKey === "final-prd",
+      ),
+    ).toBe(false);
+    expect(events.at(-2)?.metadata?.error).toContain("artifactReady=false");
+  });
+
+  it("defers participate input while task is running under one-shot execution", async () => {
     const root = await createTempProject();
     const projectDir = path.join(root, "project");
     const artifactDir = path.join(root, "artifacts");
@@ -609,11 +797,14 @@ describe("workflow runtime", () => {
       timestamp: Date.now(),
     });
 
-    expect(roleRegistry.forwardedInputs).toEqual(["这是发给 active role 的输入"]);
-    expect(events.at(0)?.message).toBe("已将输入加入当前 active role 的后续处理队列。");
+    expect(roleRegistry.forwardedInputs).toEqual([]);
+    expect(events.at(0)?.type).toBe("progress");
+    expect(events.at(0)?.message).toBe(
+      "当前默认执行模型为 one-shot；运行中输入不会透传到 active role，请在当前阶段结束后通过恢复链路继续。",
+    );
   });
 
-  it("does not report participation success when active role rejects input delivery", async () => {
+  it("reports deferred participation even when a test registry exposes input delivery hooks", async () => {
     const root = await createTempProject();
     const projectDir = path.join(root, "project");
     const artifactDir = path.join(root, "artifacts");
@@ -679,8 +870,10 @@ describe("workflow runtime", () => {
       timestamp: Date.now(),
     });
 
-    expect(events.at(0)?.type).toBe("error");
-    expect(events.at(0)?.message).toBe("当前 active role 暂未就绪，输入未透传，请稍后重试。");
+    expect(events.at(0)?.type).toBe("progress");
+    expect(events.at(0)?.message).toBe(
+      "当前默认执行模型为 one-shot；运行中输入不会透传到 active role，请在当前阶段结束后通过恢复链路继续。",
+    );
   });
 
   it("converges to failed state when role execution throws", async () => {

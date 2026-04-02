@@ -26,6 +26,6 @@
 仅在新增或修改 `@roleflow/context/features/` 下的文件时，遵守以下规则：
 
 - feature 描述系统“对外表现出来的能力”，可以是已实现（来自 explorations/）或未实现（来自 requirements/）的功能
-- 每个文件 4KB 以内，使用以下模块：Goal / Non-goals / Flow / States / Contracts / Edge Cases + Acceptance
+- 每个文件 40KB 以内，使用以下模块：Goal / Non-goals / Flow / States / Contracts / Edge Cases + Acceptance
 - 每次新增或修改 feature 文件后，必须同步更新 `@roleflow/context/features/index.md`
 - 如果“待确认问题”超过 3 个，或者“修改范围”写不清，就不要进入 Builder

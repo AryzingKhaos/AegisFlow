@@ -204,33 +204,18 @@ export class DefaultWorkflowController implements WorkflowController {
     if (this.dependencies.taskState.status === TaskStatus.RUNNING) {
       await this.saveLatestInput(message);
       this.dependencies.taskState.updatedAt = timestamp;
-      // 任务处于 RUNNING 时，participate 不再走 resume 链路，
-      // 而是作为运行中补充输入路由给当前 active role。
-      const inputDelivery =
-        (await this.dependencies.roleRegistry.sendInputToActiveRole?.(message)) ?? {
-          accepted: false,
-          mode: "rejected" as const,
-          reason: "executor_unavailable" as const,
-        };
-
       const workflowEvents: WorkflowEvent[] = [];
       await this.pushEvent(
         workflowEvents,
-        inputDelivery.accepted ? "progress" : "error",
-        inputDelivery.accepted
-          ? "已将输入加入当前 active role 的后续处理队列。"
-          : "当前 active role 暂未就绪，输入未透传，请稍后重试。",
+        "progress",
+        "当前默认执行模型为 one-shot；运行中输入不会透传到 active role，请在当前阶段结束后通过恢复链路继续。",
         {
           latestInput: message,
           activeRoleName: this.dependencies.roleRegistry.getActiveRoleName?.(),
-          inputDelivery,
+          participationMode: "one_shot_deferred",
         },
       );
-      await this.saveSnapshot(
-        inputDelivery.accepted
-          ? "task_participated_active_role"
-          : "task_participation_rejected",
-      );
+      await this.saveSnapshot("task_participation_deferred");
       return workflowEvents;
     }
 
@@ -465,6 +450,11 @@ export class DefaultWorkflowController implements WorkflowController {
       return;
     }
 
+    if (phaseConfig.name === "clarify") {
+      await this.runClarifyPhase(workflowEvents, phaseConfig, input);
+      return;
+    }
+
     await this.pushEvent(
       workflowEvents,
       "role_start",
@@ -492,41 +482,256 @@ export class DefaultWorkflowController implements WorkflowController {
       },
     );
 
-    for (const [artifactIndex, artifactContent] of roleResult.artifacts.entries()) {
+    if (roleResult.artifactReady !== false) {
+      for (const [artifactIndex, artifactContent] of roleResult.artifacts.entries()) {
       // RoleResult.artifacts 只暴露工件内容字符串；
       // 真正的命名、分目录和落盘时机仍由 Workflow 统一决定。
-      const artifactPath = await this.dependencies.artifactManager.saveArtifact(
-        this.dependencies.taskState.taskId,
-        {
-          key: createArtifactKey(
-            phaseConfig.name,
-            phaseConfig.hostRole,
+        const artifactPath = await this.dependencies.artifactManager.saveArtifact(
+          this.dependencies.taskState.taskId,
+          {
+            key: createArtifactKey(
+              phaseConfig.name,
+              phaseConfig.hostRole,
+              artifactIndex,
+            ),
+            phase: phaseConfig.name,
+            roleName: phaseConfig.hostRole,
+            title: createArtifactTitle(
+              phaseConfig.name,
+              phaseConfig.hostRole,
+              artifactIndex,
+            ),
+            content: artifactContent,
+          },
+        );
+
+        await this.pushEvent(
+          workflowEvents,
+          "artifact_created",
+          `阶段 ${phaseConfig.name} 的第 ${artifactIndex + 1} 个工件已创建。`,
+          {
+            phase: phaseConfig.name,
+            roleName: phaseConfig.hostRole,
+            artifactPath,
             artifactIndex,
-          ),
-          phase: phaseConfig.name,
-          roleName: phaseConfig.hostRole,
-          title: createArtifactTitle(
-            phaseConfig.name,
-            phaseConfig.hostRole,
-            artifactIndex,
-          ),
-          content: artifactContent,
-        },
-      );
+          },
+        );
+      }
+    }
+
+    if (roleResult.phaseCompleted === false) {
+      this.dependencies.taskState.status = TaskStatus.WAITING_USER_INPUT;
+      this.dependencies.taskState.resumeFrom = {
+        phase: phaseConfig.name,
+        roleName: phaseConfig.hostRole,
+        currentStep:
+          typeof roleResult.metadata?.currentStep === "string"
+            ? roleResult.metadata.currentStep
+            : "waiting_user_input",
+      };
+      this.touchTaskState();
 
       await this.pushEvent(
         workflowEvents,
-        "artifact_created",
-        `阶段 ${phaseConfig.name} 的第 ${artifactIndex + 1} 个工件已创建。`,
+        "progress",
+        `阶段 ${phaseConfig.name} 暂停，等待后续输入。`,
         {
           phase: phaseConfig.name,
           roleName: phaseConfig.hostRole,
-          artifactPath,
-          artifactIndex,
+          metadata: roleResult.metadata,
         },
+      );
+      await this.saveSnapshot(`phase_${phaseConfig.name}_waiting_input_after_role`);
+      return;
+    }
+
+    await this.completePhase(workflowEvents, phaseConfig);
+  }
+
+  private async runClarifyPhase(
+    workflowEvents: WorkflowEvent[],
+    phaseConfig: WorkflowPhaseConfig,
+    input?: string,
+  ): Promise<void> {
+    const taskId = this.dependencies.taskState.taskId;
+    const artifactReader = this.dependencies.artifactManager.createArtifactReader(taskId);
+    const existingInitialRequirement = await artifactReader.get(
+      `${phaseConfig.name}/initial-requirement`,
+    );
+    const existingDialogue = await artifactReader.get(
+      `${phaseConfig.name}/clarify-dialogue`,
+    );
+
+    if (!existingInitialRequirement && this.hasUsableInput(input)) {
+      await this.saveNamedArtifact(
+        workflowEvents,
+        phaseConfig,
+        "initial-requirement",
+        "initial-requirement",
+        buildInitialRequirementArtifact(input ?? ""),
       );
     }
 
+    if (existingDialogue && this.hasUsableInput(input)) {
+      await this.saveNamedArtifact(
+        workflowEvents,
+        phaseConfig,
+        "clarify-dialogue",
+        "clarify-dialogue",
+        appendClarifyDialogueAnswer(existingDialogue, input ?? ""),
+      );
+    }
+
+    await this.pushEvent(
+      workflowEvents,
+      "role_start",
+      `角色 ${phaseConfig.hostRole} 开始执行。`,
+      {
+        phase: phaseConfig.name,
+        roleName: phaseConfig.hostRole,
+      },
+    );
+
+    const roleResult = await this.runRole(
+      phaseConfig.hostRole,
+      input ?? "",
+      {
+        workflowEvents,
+        phase: phaseConfig.name,
+      },
+    );
+
+    await this.pushEvent(
+      workflowEvents,
+      "role_end",
+      `角色 ${phaseConfig.hostRole} 执行完成。`,
+      {
+        phase: phaseConfig.name,
+        roleName: phaseConfig.hostRole,
+        summary: roleResult.summary,
+        metadata: roleResult.metadata,
+      },
+    );
+
+    const decision = this.resolveClarifyDecision(roleResult);
+
+    if (decision === "ask_next_question") {
+      const question =
+        typeof roleResult.metadata?.question === "string"
+          ? roleResult.metadata.question.trim()
+          : "";
+
+      if (question.length === 0) {
+        throw new Error("Clarify role returned ask_next_question without metadata.question.");
+      }
+
+      const currentDialogue =
+        (await artifactReader.get(`${phaseConfig.name}/clarify-dialogue`)) ?? "";
+
+      await this.saveNamedArtifact(
+        workflowEvents,
+        phaseConfig,
+        "clarify-dialogue",
+        "clarify-dialogue",
+        appendClarifyDialogueQuestion(currentDialogue, question),
+      );
+
+      this.dependencies.taskState.status = TaskStatus.WAITING_USER_INPUT;
+      this.dependencies.taskState.resumeFrom = {
+        phase: phaseConfig.name,
+        roleName: phaseConfig.hostRole,
+        currentStep: "clarify_waiting_user_answer",
+      };
+      this.touchTaskState();
+
+      await this.pushEvent(
+        workflowEvents,
+        "progress",
+        question,
+        {
+          phase: phaseConfig.name,
+          roleName: phaseConfig.hostRole,
+          decision,
+        },
+      );
+      await this.saveSnapshot("phase_clarify_waiting_user_answer");
+      return;
+    }
+
+    await this.generateClarifyPrd(workflowEvents, phaseConfig);
+    await this.completePhase(workflowEvents, phaseConfig);
+  }
+
+  private async generateClarifyPrd(
+    workflowEvents: WorkflowEvent[],
+    phaseConfig: WorkflowPhaseConfig,
+  ): Promise<void> {
+    await this.pushEvent(
+      workflowEvents,
+      "role_start",
+      `角色 ${phaseConfig.hostRole} 开始生成最终 PRD。`,
+      {
+        phase: phaseConfig.name,
+        roleName: phaseConfig.hostRole,
+        step: "generate_final_prd",
+      },
+    );
+
+    const prdResult = await this.runRole(
+      phaseConfig.hostRole,
+      buildClarifyFinalPrdInput(),
+      {
+        workflowEvents,
+        phase: phaseConfig.name,
+      },
+    );
+
+    await this.pushEvent(
+      workflowEvents,
+      "role_end",
+      `角色 ${phaseConfig.hostRole} 最终 PRD 生成完成。`,
+      {
+        phase: phaseConfig.name,
+        roleName: phaseConfig.hostRole,
+        step: "generate_final_prd",
+        summary: prdResult.summary,
+        metadata: prdResult.metadata,
+      },
+    );
+
+    if (prdResult.artifactReady === false) {
+      throw new Error(
+        "Clarify final PRD generation returned artifactReady=false.",
+      );
+    }
+
+    if (prdResult.phaseCompleted === false) {
+      throw new Error(
+        "Clarify final PRD generation returned phaseCompleted=false.",
+      );
+    }
+
+    const prdContent = prdResult.artifacts[0]?.trim();
+
+    if (!prdContent) {
+      throw new Error(
+        "Clarify final PRD generation must return a non-empty artifact.",
+      );
+    }
+
+    await this.saveNamedArtifact(
+      workflowEvents,
+      phaseConfig,
+      "final-prd",
+      "final-prd",
+      prdContent,
+    );
+  }
+
+  private async completePhase(
+    workflowEvents: WorkflowEvent[],
+    phaseConfig: WorkflowPhaseConfig,
+  ): Promise<void> {
     this.dependencies.taskState.phaseStatus = "done";
     this.touchTaskState();
 
@@ -580,6 +785,54 @@ export class DefaultWorkflowController implements WorkflowController {
         }
       : undefined;
     this.touchTaskState();
+  }
+
+  private resolveClarifyDecision(
+    roleResult: RoleResult,
+  ): "ask_next_question" | "ready_for_prd" {
+    const decision = roleResult.metadata?.decision;
+
+    if (
+      decision !== "ask_next_question" &&
+      decision !== "ready_for_prd"
+    ) {
+      throw new Error(
+        "Clarify role must return metadata.decision as ask_next_question or ready_for_prd.",
+      );
+    }
+
+    return decision;
+  }
+
+  private async saveNamedArtifact(
+    workflowEvents: WorkflowEvent[],
+    phaseConfig: WorkflowPhaseConfig,
+    artifactKey: string,
+    artifactTitle: string,
+    content: string,
+  ): Promise<void> {
+    const artifactPath = await this.dependencies.artifactManager.saveArtifact(
+      this.dependencies.taskState.taskId,
+      {
+        key: artifactKey,
+        phase: phaseConfig.name,
+        roleName: phaseConfig.hostRole,
+        title: artifactTitle,
+        content,
+      },
+    );
+
+    await this.pushEvent(
+      workflowEvents,
+      "artifact_created",
+      `阶段 ${phaseConfig.name} 的工件 ${artifactKey} 已创建。`,
+      {
+        phase: phaseConfig.name,
+        roleName: phaseConfig.hostRole,
+        artifactKey,
+        artifactPath,
+      },
+    );
   }
 
   private resolveRunStartPhase(): WorkflowPhaseConfig {
@@ -831,4 +1084,73 @@ function createArtifactTitle(
   artifactIndex: number,
 ): string {
   return `${phase}-${roleName}-${artifactIndex + 1}`;
+}
+
+function buildInitialRequirementArtifact(input: string): string {
+  return ["# Initial Requirement", "", input.trim()].join("\n");
+}
+
+function appendClarifyDialogueQuestion(
+  existingContent: string,
+  question: string,
+): string {
+  const round = nextClarifyDialogueRound(existingContent);
+  const prefix =
+    existingContent.trim().length > 0 ? `${existingContent.trim()}\n\n` : "# Clarify Dialogue\n\n";
+
+  return [
+    prefix,
+    `## Round ${String(round)} Question`,
+    "",
+    question.trim(),
+  ].join("\n");
+}
+
+function appendClarifyDialogueAnswer(
+  existingContent: string,
+  answer: string,
+): string {
+  const trimmed = existingContent.trim();
+  const round = currentClarifyDialogueRound(trimmed);
+
+  if (trimmed.length === 0 || round === 0) {
+    return [
+      "# Clarify Dialogue",
+      "",
+      "## Round 1 Answer",
+      "",
+      answer.trim(),
+    ].join("\n");
+  }
+
+  return [
+    trimmed,
+    "",
+    `## Round ${String(round)} Answer`,
+    "",
+    answer.trim(),
+  ].join("\n");
+}
+
+function currentClarifyDialogueRound(content: string): number {
+  const matches = [...content.matchAll(/## Round (\d+) Question/g)];
+  const lastMatch = matches.at(-1);
+
+  if (!lastMatch) {
+    return 0;
+  }
+
+  return Number(lastMatch[1]);
+}
+
+function nextClarifyDialogueRound(content: string): number {
+  return currentClarifyDialogueRound(content) + 1;
+}
+
+function buildClarifyFinalPrdInput(): string {
+  return [
+    "请基于当前 clarify 阶段可见的 initial requirement 与 clarify dialogue 工件，",
+    "生成最终 PRD 工件内容。",
+    "这次调用的目标是正式生成 PRD，而不是继续提问。",
+  ].join("\n");
 }

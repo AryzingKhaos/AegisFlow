@@ -78,7 +78,8 @@ describe("IntakeAgent", () => {
     expect(rendered).toContain("=== 任务开始 ===");
     expect(rendered).toContain("=== 阶段开始｜clarify ===");
     expect(rendered).toContain("--- 角色开始｜clarifier @ clarify ---");
-    expect(rendered).toContain("clarifier 已通过 stub Agent 执行 clarify 阶段。");
+    expect(rendered).toContain("clarifier 已通过 stub Agent 完成澄清判断。");
+    expect(rendered).toContain("clarifier 已基于初始需求与问答生成最终 PRD。");
     expect(rendered).not.toContain("[WorkflowEvent:");
     expect(rendered).not.toContain("metadata=");
     expect(rendered).not.toContain(">>> 角色输出｜");
@@ -108,7 +109,7 @@ describe("IntakeAgent", () => {
     expect(lines.join("\n")).not.toContain("=== 任务开始 ===");
     expect(streamedLines.join("\n")).toContain("=== 任务开始 ===");
     expect(streamedLines.join("\n")).toContain(
-      "clarifier 已通过 stub Agent 执行 clarify 阶段。",
+      "clarifier 已通过 stub Agent 完成澄清判断。",
     );
     expect(streamedLines.join("\n")).not.toContain(">>> 角色输出｜");
   });

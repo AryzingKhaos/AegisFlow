@@ -40,12 +40,15 @@ roles:
   prototypeDir: "/Users/aaron/code/roleflow/roles"
   promptDir: ".aegisflow/roles"
   executor:
-    type: "codex-cli"
-    command: "codex"
-    cwd: "."
-    timeoutMs: 300000
-    env:
-      passthrough: true
+    transport:
+      type: "child_process"
+      cwd: "."
+      timeoutMs: 300000
+      env:
+        passthrough: true
+    provider:
+      type: "codex"
+      command: "codex"
 
 artifacts:
   structure: "by-phase"
