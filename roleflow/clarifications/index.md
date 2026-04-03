@@ -18,6 +18,7 @@
 |------|------|------|
 | `0.1.0` | `default-workflow-intake-layer` | [0.1.0/default-workflow-intake-layer-prd.md](0.1.0/default-workflow-intake-layer-prd.md) |
 | `0.1.0` | `default-workflow-intake-ink-ui` | [0.1.0/default-workflow-intake-ink-ui-prd.md](0.1.0/default-workflow-intake-ink-ui-prd.md) |
+| `0.1.0` | `default-workflow-intake-project-workflows` | [0.1.0/default-workflow-intake-project-workflows-prd.md](0.1.0/default-workflow-intake-project-workflows-prd.md) |
 | `0.1.0` | `default-workflow-workflow-layer` | [0.1.0/default-workflow-workflow-layer-prd.md](0.1.0/default-workflow-workflow-layer-prd.md) |
 | `0.1.0` | `default-workflow-role-layer` | [0.1.0/default-workflow-role-layer-prd.md](0.1.0/default-workflow-role-layer-prd.md) |
 | `0.1.0` | `default-workflow-cli-streaming-output` | [0.1.0/default-workflow-cli-streaming-output-prd.md](0.1.0/default-workflow-cli-streaming-output-prd.md) |

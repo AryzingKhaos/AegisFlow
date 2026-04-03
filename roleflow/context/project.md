@@ -323,7 +323,15 @@ interface ProjectConfig {
    cwd: string; // 目标项目地址
    artifactPath: string; // 输出artifact的根目录
    targetProjectRolePromptPath: string; // 目标项目角色提示词目录加载后的内存值，等价于 roles.promptDir；默认按严格同名文件读取 planner.md、builder.md、critic.md 等。若 roles.overrides.*.extraInstructions 已配置，则优先使用 override 指向的文件；与角色原型文档按追加方式组装，冲突时项目侧职责优先，缺失时回退到角色原型文档
-   workflowPhases: PhaseConfig[]; // workflow阶段配置，hostRole 是每个 phase 的主持人
+   workflows: WorkflowConfig[]; // 从 aegisproject.yaml 读取的全部可选 workflow；Intake 需要基于 description 推荐
+   selectedWorkflow: WorkflowConfig; // 当前任务最终确认使用的 workflow
+   workflowPhases: PhaseConfig[]; // 等价于 selectedWorkflow.phases，hostRole 是每个 phase 的主持人
+}
+
+interface WorkflowConfig {
+   name: string;
+   description: string; // 供 Intake 判断和推荐 workflow 使用
+   phases: PhaseConfig[];
 }
 
 interface PhaseConfig {
@@ -401,7 +409,10 @@ interface ExecutionContext {
 #### Intake层
 Intake本身是一个Agent，所以对象应该叫 IntakeAgent？
  - 是一个UI层 + 轻决策层
- - 第一次跟用户沟通，主要目的是补齐runtime初始化需要的资料，唯一需要做决策的内容是选择具体的 workflow。
+ - 第一次跟用户沟通，主要目的是补齐runtime初始化需要的资料，唯一需要做决策的内容是从 `.aegisflow/aegisproject.yaml` 里声明的多个 workflow 中推荐并确认具体的 workflow。
+ - workflow 不能由代码写死，必须从项目下 `aegisproject.yaml` 中读取
+ - 如果 `aegisproject.yaml` 中的 workflow 配置不合规范，Intake 需要明确报错，并要求用户先修正 `aegisproject.yaml`
+ - Intake 需要根据每个 workflow 的 `description` 与用户需求语义，判断并推荐更合适的 workflow
  - 没有具体的命令，只要用户描述了内容，就要根据用户描述的内容猜测用户想干什么，并询问用户“是不是想要XXX”
  - intake目前提供的能力
 	 - 创建任务，并描述
@@ -550,40 +561,56 @@ codeStyle:
   unitTestRules: "docs/unit_test_rules.md"   # 单测规范
   codeReviewGuide: "docs/code_review.md"     # review注意事项
 
-workflow:
-  type: "default-workflow" # 预留：未来支持多 workflow
-  phases:
-    - name: "clarify"
-      hostRole: "clarifier"
-      needApproval: false
+workflows:
+  - name: "default-delivery-workflow"
+    description: "适用于已有功能修改、Bugfix 和小型新功能开发，需要走 clarify、explore、plan、build、review、test-design、unit-test、test 的完整交付流程。"
+    phases:
+      - name: "clarify"
+        hostRole: "clarifier"
+        needApproval: false
 
-    - name: "explore"
-      hostRole: "explorer"
-      needApproval: false
+      - name: "explore"
+        hostRole: "explorer"
+        needApproval: false
 
-    - name: "plan"
-      hostRole: "planner"
-      needApproval: true
+      - name: "plan"
+        hostRole: "planner"
+        needApproval: true
 
-    - name: "build"
-      hostRole: "builder"
-      needApproval: false
+      - name: "build"
+        hostRole: "builder"
+        needApproval: false
 
-    - name: "review"
-      hostRole: "critic"
-      needApproval: true
+      - name: "review"
+        hostRole: "critic"
+        needApproval: true
 
-    - name: "test-design"
-      hostRole: "test-designer"
-      needApproval: false
+      - name: "test-design"
+        hostRole: "test-designer"
+        needApproval: false
 
-    - name: "unit-test"
-      hostRole: "test-writer"
-      needApproval: false
+      - name: "unit-test"
+        hostRole: "test-writer"
+        needApproval: false
 
-    - name: "test"
-      hostRole: "tester"
-      needApproval: false
+      - name: "test"
+        hostRole: "tester"
+        needApproval: false
+
+  - name: "analysis-only-workflow"
+    description: "适用于先做需求澄清、代码探索和方案规划，不立即改代码的场景，例如陌生项目调研、方案预研、影响面分析。"
+    phases:
+      - name: "clarify"
+        hostRole: "clarifier"
+        needApproval: false
+
+      - name: "explore"
+        hostRole: "explorer"
+        needApproval: false
+
+      - name: "plan"
+        hostRole: "planner"
+        needApproval: true
 
 roles:
   prototypeDir: "/Users/aaron/code/roleflow/roles" # 角色原型目录

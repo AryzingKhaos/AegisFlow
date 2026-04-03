@@ -11,6 +11,7 @@
 |------|------|------|
 | `default-workflow-intake-layer` | [default-workflow-intake-layer-prd.md](default-workflow-intake-layer-prd.md) | `default-workflow` 的 `Intake` 层需求文档 |
 | `default-workflow-intake-ink-ui` | [default-workflow-intake-ink-ui-prd.md](default-workflow-intake-ink-ui-prd.md) | `default-workflow` 的 `Intake` 终端展示层、Ink/React UI 与 codex 风格输出分层需求文档 |
+| `default-workflow-intake-project-workflows` | [default-workflow-intake-project-workflows-prd.md](default-workflow-intake-project-workflows-prd.md) | `default-workflow` 的 Intake 从项目侧 `aegisproject.yaml` 读取多个 workflow、校验配置并基于 description 推荐 workflow 的需求文档 |
 | `default-workflow-workflow-layer` | [default-workflow-workflow-layer-prd.md](default-workflow-workflow-layer-prd.md) | `default-workflow` 的 `Workflow` 层需求文档 |
 | `default-workflow-role-layer` | [default-workflow-role-layer-prd.md](default-workflow-role-layer-prd.md) | `default-workflow` 的 `Role` 层公共需求文档 |
 | `default-workflow-cli-streaming-output` | [default-workflow-cli-streaming-output-prd.md](default-workflow-cli-streaming-output-prd.md) | `default-workflow` 的 CLI 流式输出与排版需求文档 |
