@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -28,7 +28,6 @@ describe("IntakeAgent", () => {
     const agent = new IntakeAgent(root);
 
     await agent.handleUserInput("修复登录报错");
-    await agent.handleUserInput("y");
 
     const lines = await agent.handleUserInput("取消任务");
 
@@ -41,12 +40,12 @@ describe("IntakeAgent", () => {
     const projectDir = path.join(root, "project");
     const artifactDir = path.join(root, "custom-artifacts");
     await mkdir(projectDir, { recursive: true });
+    await writeProjectWorkflowConfig(projectDir);
 
     const firstAgent = new IntakeAgent(root);
     await firstAgent.handleUserInput("修复登录报错");
-    await firstAgent.handleUserInput("y");
-    await firstAgent.handleUserInput("y");
     await firstAgent.handleUserInput(projectDir);
+    await firstAgent.handleUserInput("y");
     const startLines = await firstAgent.handleUserInput(artifactDir);
     const interruptResult = await firstAgent.handleInterruptSignal();
     const [taskId] = await readdir(path.join(artifactDir, "tasks"));
@@ -66,12 +65,12 @@ describe("IntakeAgent", () => {
     tempDirs.push(root);
     const projectDir = path.join(root, "project");
     await mkdir(projectDir, { recursive: true });
+    await writeProjectWorkflowConfig(projectDir);
     const agent = new IntakeAgent(root);
 
     await agent.handleUserInput("修复登录报错");
-    await agent.handleUserInput("y");
-    await agent.handleUserInput("y");
     await agent.handleUserInput(projectDir);
+    await agent.handleUserInput("y");
     const lines = await agent.handleUserInput("");
 
     const rendered = lines.join("\n");
@@ -91,6 +90,7 @@ describe("IntakeAgent", () => {
     tempDirs.push(root);
     const projectDir = path.join(root, "project");
     await mkdir(projectDir, { recursive: true });
+    await writeProjectWorkflowConfig(projectDir);
 
     const streamedLines: string[] = [];
     const agent = new IntakeAgent(root, {
@@ -100,9 +100,8 @@ describe("IntakeAgent", () => {
     });
 
     await agent.handleUserInput("修复登录报错");
-    await agent.handleUserInput("y");
-    await agent.handleUserInput("y");
     await agent.handleUserInput(projectDir);
+    await agent.handleUserInput("y");
     const lines = await agent.handleUserInput("");
 
     expect(lines.join("\n")).toContain("Runtime 初始化成功");
@@ -119,12 +118,12 @@ describe("IntakeAgent", () => {
     tempDirs.push(root);
     const projectDir = path.join(root, "project");
     await mkdir(projectDir, { recursive: true });
+    await writeProjectWorkflowConfig(projectDir);
 
     const agent = new IntakeAgent(root);
     await agent.handleUserInput("修复登录报错");
-    await agent.handleUserInput("y");
-    await agent.handleUserInput("y");
     await agent.handleUserInput(projectDir);
+    await agent.handleUserInput("y");
     await agent.handleUserInput("");
     await agent.handleInterruptSignal();
 
@@ -144,12 +143,12 @@ describe("IntakeAgent", () => {
     tempDirs.push(root);
     const projectDir = path.join(root, "project");
     await mkdir(projectDir, { recursive: true });
+    await writeProjectWorkflowConfig(projectDir);
 
     const agent = new IntakeAgent(root);
     await agent.handleUserInput("修复登录报错");
-    await agent.handleUserInput("y");
-    await agent.handleUserInput("y");
     await agent.handleUserInput(projectDir);
+    await agent.handleUserInput("y");
     await agent.handleUserInput("");
 
     const runtime = (agent as unknown as {
@@ -273,16 +272,315 @@ describe("IntakeAgent", () => {
     expect(rendered).toEqual(["\n- 第一步\n\n```ts\nconst answer = 42;\n```\n"]);
   });
 
-  it("collects workflow orchestration before runtime initialization", async () => {
+  it("recommends workflow from project config before runtime initialization", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "aegisflow-agent-"));
     tempDirs.push(root);
+    const projectDir = path.join(root, "project");
+    await mkdir(projectDir, { recursive: true });
+    await writeProjectWorkflowConfig(projectDir);
     const agent = new IntakeAgent(root);
 
     await agent.handleUserInput("修复登录报错");
-    const lines = await agent.handleUserInput("y");
+    const lines = await agent.handleUserInput(projectDir);
 
-    expect(lines).toEqual([
-      "当前 workflow 编排将使用 default-workflow/v0.1：clarify -> explore -> plan -> build -> review -> test-design -> unit-test -> test。是否确认？请回答 y/n。",
+    expect(lines).toContain(`目标项目目录已确认：${projectDir}`);
+    expect(lines).toContain(`推荐 workflow：bugfix-workflow`);
+    expect(lines.some((line) => line.includes("推荐理由："))).toBe(true);
+    expect(lines).toContain(
+      "流程编排：clarify -> explore -> plan -> build -> review -> test-design -> unit-test -> test",
+    );
+  });
+
+  it("allows switching to another workflow from the project catalog", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "aegisflow-agent-"));
+    tempDirs.push(root);
+    const projectDir = path.join(root, "project");
+    await mkdir(projectDir, { recursive: true });
+    await writeProjectWorkflowConfig(projectDir);
+    const agent = new IntakeAgent(root);
+
+    await agent.handleUserInput("修复登录报错");
+    await agent.handleUserInput(projectDir);
+    const selectionLines = await agent.handleUserInput("n");
+
+    expect(selectionLines).toContain("请从当前项目配置中改选其他 workflow：");
+    expect(selectionLines).toContain(
+      "1. feature-change-workflow：已有功能点的规则修改、页面适配或联动逻辑调整。",
+    );
+
+    const confirmLines = await agent.handleUserInput("1");
+
+    expect(confirmLines).toContain("已切换为 workflow：feature-change-workflow。");
+    expect(confirmLines).toContain(
+      `请提供工件保存目录。直接回车将使用默认目录：${path.resolve(projectDir, ".aegisflow", "artifacts")}`,
+    );
+
+    await agent.handleUserInput("");
+    const runtime = (agent as unknown as {
+      runtime?: {
+        projectConfig: {
+          workflow: {
+            name: string;
+          };
+          workflowPhases: Array<{
+            name: string;
+          }>;
+        };
+      };
+    }).runtime;
+
+    expect(runtime?.projectConfig.workflow.name).toBe("feature-change-workflow");
+    expect(runtime?.projectConfig.workflowPhases.map((phase) => phase.name)).toEqual([
+      "clarify",
+      "explore",
+      "plan",
+      "build",
+      "review",
+      "test-design",
+      "unit-test",
+      "test",
     ]);
   });
+
+  it("rejects malformed numeric workflow selection input", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "aegisflow-agent-"));
+    tempDirs.push(root);
+    const projectDir = path.join(root, "project");
+    await mkdir(projectDir, { recursive: true });
+    await writeProjectWorkflowConfig(projectDir);
+    const agent = new IntakeAgent(root);
+
+    await agent.handleUserInput("修复登录报错");
+    await agent.handleUserInput(projectDir);
+    await agent.handleUserInput("n");
+    const lines = await agent.handleUserInput("1abc");
+
+    expect(lines).toEqual([
+      "无法识别 workflow 选择，请输入列表里的序号或 workflow 名称。",
+    ]);
+  });
+
+  it("blocks startup when workflows config is invalid", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "aegisflow-agent-"));
+    tempDirs.push(root);
+    const projectDir = path.join(root, "project");
+    await mkdir(path.join(projectDir, ".aegisflow"), { recursive: true });
+    await writeFile(
+      path.join(projectDir, ".aegisflow", "aegisproject.yaml"),
+      [
+        "workflow:",
+        '  type: "default-workflow"',
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    const agent = new IntakeAgent(root);
+
+    await agent.handleUserInput("修复登录报错");
+    const lines = await agent.handleUserInput(projectDir);
+
+    expect(lines).toEqual([
+      `项目 workflow 配置非法：当前仍使用旧的 workflow 单对象结构；本期必须改为 workflows 非空列表。 请修正 ${path.join(projectDir, ".aegisflow", "aegisproject.yaml")} 中的 workflows 配置。`,
+    ]);
+  });
+
+  it("blocks startup when workflow names are duplicated", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "aegisflow-agent-"));
+    tempDirs.push(root);
+    const projectDir = path.join(root, "project");
+    await writeCustomWorkflowConfig(
+      projectDir,
+      [
+        '  - name: "duplicate-workflow"',
+        '    description: "第一套规则修改流程。"',
+        "    phases:",
+        '      - name: "clarify"',
+        '        hostRole: "clarifier"',
+        "        needApproval: false",
+        '  - name: "duplicate-workflow"',
+        '    description: "第二套规则修改流程。"',
+        "    phases:",
+        '      - name: "build"',
+        '        hostRole: "builder"',
+        "        needApproval: false",
+      ],
+    );
+    const agent = new IntakeAgent(root);
+
+    await agent.handleUserInput("调整列表排序规则");
+    const lines = await agent.handleUserInput(projectDir);
+
+    expect(lines).toEqual([
+      `项目 workflow 配置非法：workflows[1].name 重复：duplicate-workflow。 请修正 ${path.join(projectDir, ".aegisflow", "aegisproject.yaml")} 中的 workflows 配置。`,
+    ]);
+  });
+
+  it("blocks startup when a workflow contains duplicated phase names", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "aegisflow-agent-"));
+    tempDirs.push(root);
+    const projectDir = path.join(root, "project");
+    await writeCustomWorkflowConfig(
+      projectDir,
+      [
+        '  - name: "duplicate-phase-workflow"',
+        '    description: "构建并再次构建的错误配置。"',
+        "    phases:",
+        '      - name: "build"',
+        '        hostRole: "builder"',
+        "        needApproval: false",
+        '      - name: "build"',
+        '        hostRole: "builder"',
+        "        needApproval: false",
+      ],
+    );
+    const agent = new IntakeAgent(root);
+
+    await agent.handleUserInput("新增一个构建步骤");
+    const lines = await agent.handleUserInput(projectDir);
+
+    expect(lines).toEqual([
+      `项目 workflow 配置非法：workflow duplicate-phase-workflow 的 phases[1].name 重复：build。 请修正 ${path.join(projectDir, ".aegisflow", "aegisproject.yaml")} 中的 workflows 配置。`,
+    ]);
+  });
+
+  it("prefers the workflow whose description text matches more closely within the same task type", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "aegisflow-agent-"));
+    tempDirs.push(root);
+    const projectDir = path.join(root, "project");
+    await writeCustomWorkflowConfig(
+      projectDir,
+      [
+        '  - name: "ui-adjustment-workflow"',
+        '    description: "页面样式调整、按钮布局适配、文案展示优化。"',
+        "    phases:",
+        '      - name: "clarify"',
+        '        hostRole: "clarifier"',
+        "        needApproval: false",
+        '  - name: "permission-rule-workflow"',
+        '    description: "权限规则修改、审批条件调整、角色访问控制策略更新。"',
+        "    phases:",
+        '      - name: "clarify"',
+        '        hostRole: "clarifier"',
+        "        needApproval: false",
+      ],
+    );
+    const agent = new IntakeAgent(root);
+
+    await agent.handleUserInput("调整审批权限规则和角色访问控制");
+    const lines = await agent.handleUserInput(projectDir);
+
+    expect(lines).toContain("推荐 workflow：permission-rule-workflow");
+  });
 });
+
+async function writeProjectWorkflowConfig(projectDir: string): Promise<void> {
+  await writeCustomWorkflowConfig(projectDir, [
+      "workflows:",
+      '  - name: "feature-change-workflow"',
+      '    description: "已有功能点的规则修改、页面适配或联动逻辑调整。"',
+      "    phases:",
+      '      - name: "clarify"',
+      '        hostRole: "clarifier"',
+      "        needApproval: false",
+      '      - name: "explore"',
+      '        hostRole: "explorer"',
+      "        needApproval: false",
+      '      - name: "plan"',
+      '        hostRole: "planner"',
+      "        needApproval: true",
+      '      - name: "build"',
+      '        hostRole: "builder"',
+      "        needApproval: false",
+      '      - name: "review"',
+      '        hostRole: "critic"',
+      "        needApproval: true",
+      '      - name: "test-design"',
+      '        hostRole: "test-designer"',
+      "        needApproval: false",
+      '      - name: "unit-test"',
+      '        hostRole: "test-writer"',
+      "        needApproval: false",
+      '      - name: "test"',
+      '        hostRole: "tester"',
+      "        needApproval: false",
+      '  - name: "bugfix-workflow"',
+      '    description: "已有问题修复、边界情况修复或回归问题修复。"',
+      "    phases:",
+      '      - name: "clarify"',
+      '        hostRole: "clarifier"',
+      "        needApproval: false",
+      '      - name: "explore"',
+      '        hostRole: "explorer"',
+      "        needApproval: false",
+      '      - name: "plan"',
+      '        hostRole: "planner"',
+      "        needApproval: true",
+      '      - name: "build"',
+      '        hostRole: "builder"',
+      "        needApproval: false",
+      '      - name: "review"',
+      '        hostRole: "critic"',
+      "        needApproval: true",
+      '      - name: "test-design"',
+      '        hostRole: "test-designer"',
+      "        needApproval: false",
+      '      - name: "unit-test"',
+      '        hostRole: "test-writer"',
+      "        needApproval: false",
+      '      - name: "test"',
+      '        hostRole: "tester"',
+      "        needApproval: false",
+      '  - name: "small-new-feature-workflow"',
+      '    description: "较小范围的新功能点开发。"',
+      "    phases:",
+      '      - name: "clarify"',
+      '        hostRole: "clarifier"',
+      "        needApproval: false",
+      '      - name: "explore"',
+      '        hostRole: "explorer"',
+      "        needApproval: false",
+      '      - name: "plan"',
+      '        hostRole: "planner"',
+      "        needApproval: true",
+      '      - name: "build"',
+      '        hostRole: "builder"',
+      "        needApproval: false",
+      '      - name: "review"',
+      '        hostRole: "critic"',
+      "        needApproval: true",
+      '      - name: "test-design"',
+      '        hostRole: "test-designer"',
+      "        needApproval: false",
+      '      - name: "unit-test"',
+      '        hostRole: "test-writer"',
+      "        needApproval: false",
+      '      - name: "test"',
+      '        hostRole: "tester"',
+      "        needApproval: false",
+      "roles:",
+      "  executor:",
+      "    transport:",
+      '      type: "child_process"',
+      '      cwd: "."',
+      "      timeoutMs: 300000",
+      "      env:",
+      "        passthrough: true",
+      "    provider:",
+      '      type: "codex"',
+      '      command: "codex"',
+      "",
+    ]);
+}
+
+async function writeCustomWorkflowConfig(
+  projectDir: string,
+  lines: string[],
+): Promise<void> {
+  const contentLines = lines[0] === "workflows:" ? lines : ["workflows:", ...lines];
+  await mkdir(path.join(projectDir, ".aegisflow"), { recursive: true });
+  await writeFile(
+    path.join(projectDir, ".aegisflow", "aegisproject.yaml"),
+    contentLines.join("\n"),
+    "utf8",
+  );
+}

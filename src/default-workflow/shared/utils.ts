@@ -11,6 +11,7 @@ import {
   SUPPORTED_WORKFLOW_TYPES,
 } from "./constants";
 import type {
+  ProjectWorkflowDefinition,
   ProjectConfig,
   RoleName,
   RoleExecutorConfig,
@@ -64,13 +65,30 @@ export function createWorkflowSelection(
 ): WorkflowSelection {
   return {
     id: DEFAULT_WORKFLOW_ID,
+    name: DEFAULT_WORKFLOW_ID,
     taskType,
     label: SUPPORTED_WORKFLOW_TYPES[taskType].label,
+    description: SUPPORTED_WORKFLOW_TYPES[taskType].description,
+    source: "default",
   };
 }
 
 export function createDefaultWorkflowPhases(): WorkflowPhaseConfig[] {
   return DEFAULT_WORKFLOW_PHASES.map((phaseConfig) => ({ ...phaseConfig }));
+}
+
+export function createProjectWorkflowSelection(
+  workflow: ProjectWorkflowDefinition,
+  taskType?: WorkflowTaskType,
+): WorkflowSelection {
+  return {
+    id: workflow.name,
+    name: workflow.name,
+    label: workflow.name,
+    description: workflow.description,
+    taskType,
+    source: "project_config",
+  };
 }
 
 export function createInitialTaskState(

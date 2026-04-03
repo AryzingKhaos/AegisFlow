@@ -5,16 +5,16 @@ import {
   INTAKE_RESUME_INDEX_FILE,
   INTAKE_STATE_DIR_NAME,
   OUT_OF_SCOPE_REPLY,
-  SUPPORTED_WORKFLOW_TYPES,
 } from "../shared/constants";
 import {
   buildRuntimeForNewTask,
   buildRuntimeForResume,
   findLatestPersistedTask,
+  loadProjectWorkflowCatalog,
   loadPersistedTaskById,
 } from "../runtime/builder";
 import {
-  createDefaultWorkflowPhases,
+  createProjectWorkflowSelection,
   createWorkflowSelection,
   formatWorkflowPhases,
   isFalsyAnswer,
@@ -24,15 +24,14 @@ import {
 import type {
   IntakeEvent,
   IntakeEventType,
+  ProjectWorkflowCatalog,
+  ProjectWorkflowDefinition,
   PersistedTaskContext,
   Runtime,
-  WorkflowPhaseConfig,
   WorkflowEvent,
-  WorkflowTaskType,
 } from "../shared/types";
 import { TaskStatus } from "../shared/types";
 import {
-  describeWorkflowGuess,
   inferWorkflowTaskType,
   normalizeUserIntent,
 } from "./intent";
@@ -41,7 +40,6 @@ import { formatWorkflowEventForCli } from "./output";
 
 type PendingStep =
   | "confirm_workflow"
-  | "confirm_workflow_profile"
   | "select_workflow"
   | "collect_project_dir"
   | "collect_artifact_dir";
@@ -49,7 +47,9 @@ type PendingStep =
 interface DraftTask {
   description: string;
   workflow?: ReturnType<typeof createWorkflowSelection>;
-  workflowPhases?: WorkflowPhaseConfig[];
+  workflowCatalog?: ProjectWorkflowCatalog;
+  selectedWorkflow?: ProjectWorkflowDefinition;
+  recommendationReason?: string;
   projectDir?: string;
   artifactDir?: string;
 }
@@ -82,9 +82,7 @@ export class IntakeAgent {
     return [
       "AegisFlow Intake CLI 已启动。",
       `模型初始化完成：${this.modelBootstrap.config.model} @ ${this.modelBootstrap.config.baseUrl}`,
-      `支持任务类型：${Object.values(SUPPORTED_WORKFLOW_TYPES)
-        .map((definition) => definition.label)
-        .join(" / ")}`,
+      "workflow 将从目标项目的 .aegisflow/aegisproject.yaml 读取并推荐。",
       "直接输入自然语言需求即可开始；如需恢复未完成任务，可输入“恢复任务”或“继续执行”。",
     ];
   }
@@ -201,19 +199,15 @@ export class IntakeAgent {
     switch (this.pendingStep) {
       case "confirm_workflow":
         if (isTruthyAnswer(input)) {
-          return this.confirmWorkflowProfile();
+          return this.confirmRecommendedWorkflow();
         }
 
         if (isFalsyAnswer(input)) {
           this.pendingStep = "select_workflow";
-          return [
-            "请在以下类型中重新选择：Feature Change / Bugfix / Small New Feature。",
-          ];
+          return this.buildWorkflowSelectionPrompt();
         }
 
         return ["请回答 y/n，或输入 是/否。"];
-      case "confirm_workflow_profile":
-        return this.handleWorkflowProfileConfirmation(input);
       case "select_workflow":
         return this.selectWorkflowFromUserInput(input);
       case "collect_project_dir":
@@ -226,47 +220,36 @@ export class IntakeAgent {
   }
 
   private async startDraftTask(description: string): Promise<string[]> {
-    const workflowGuess = inferWorkflowTaskType(description);
-    const workflow = createWorkflowSelection(workflowGuess.taskType);
-    // draft 只保存 Runtime 初始化前必须补齐的资料，
-    // 真正的 Runtime 会在资料确认完成后一次性创建。
     this.draft = {
       description,
-      workflow,
-      workflowPhases: createDefaultWorkflowPhases(),
     };
-    this.pendingStep = "confirm_workflow";
+    this.pendingStep = "collect_project_dir";
 
     return [
-      `我理解这更像是 ${workflow.label}，将使用 ${workflow.id}。`,
-      describeWorkflowGuess(workflowGuess.taskType),
-      "是不是想要这个类型？请回答 y/n。",
+      "请提供目标项目目录。直接回车、输入“默认”或“当前目录”将使用当前工作目录。",
     ];
   }
 
   private async selectWorkflowFromUserInput(input: string): Promise<string[]> {
-    const workflowType = parseWorkflowSelectionInput(input);
-
-    if (!workflowType) {
-      return [
-        "无法识别任务类型，请明确输入 Bugfix、Feature Change 或 Small New Feature。",
-      ];
-    }
-
     if (!this.draft) {
       return this.startDraftTask(input);
     }
 
-    this.draft.workflow = createWorkflowSelection(workflowType);
-    // 当前版本只支持一套 default workflow profile，
-    // 但仍显式保留 workflowPhases，避免再次退回“只有 workflow 类型”的简化模型。
-    this.draft.workflowPhases = createDefaultWorkflowPhases();
-    this.pendingStep = "confirm_workflow_profile";
+    const selectedWorkflow = resolveWorkflowSelection(
+      input,
+      this.draft.workflowCatalog?.workflows,
+    );
 
-    return [
-      `已切换为 ${this.draft.workflow.label}。`,
-      this.getWorkflowProfilePrompt(),
-    ];
+    if (!selectedWorkflow) {
+      return [
+        "无法识别 workflow 选择，请输入列表里的序号或 workflow 名称。",
+      ];
+    }
+
+    this.applySelectedWorkflow(selectedWorkflow);
+    this.pendingStep = "collect_artifact_dir";
+
+    return this.buildArtifactDirPromptLines(`已切换为 workflow：${selectedWorkflow.name}。`);
   }
 
   private async collectProjectDir(input: string): Promise<string[]> {
@@ -281,21 +264,34 @@ export class IntakeAgent {
       return [`目标项目目录不存在或不可访问：${projectDir}`];
     }
 
-    this.draft.projectDir = projectDir;
-    this.pendingStep = "collect_artifact_dir";
+    try {
+      const workflowCatalog = await loadProjectWorkflowCatalog(projectDir);
+      const recommendation = recommendProjectWorkflow(
+        this.draft.description,
+        workflowCatalog.workflows,
+      );
 
-    return [
-      `目标项目目录已确认：${projectDir}`,
-      `请提供工件保存目录。直接回车将使用默认目录：${path.resolve(projectDir, DEFAULT_ARTIFACT_DIR_NAME)}`,
-    ];
+      this.draft.projectDir = projectDir;
+      this.draft.workflowCatalog = workflowCatalog;
+      this.applySelectedWorkflow(recommendation.workflow, recommendation.reason);
+      this.pendingStep = "confirm_workflow";
+
+      return [
+        `目标项目目录已确认：${projectDir}`,
+        `已读取项目 workflow 配置：${workflowCatalog.configPath}`,
+        `推荐 workflow：${recommendation.workflow.name}`,
+        `推荐理由：${recommendation.reason}`,
+        `workflow 描述：${recommendation.workflow.description}`,
+        `流程编排：${formatWorkflowPhases(recommendation.workflow.phases)}`,
+        "是否确认使用该 workflow？请回答 y/n。",
+      ];
+    } catch (error) {
+      return [getErrorMessage(error)];
+    }
   }
 
   private async collectArtifactDir(input: string): Promise<string[]> {
-    if (
-      !this.draft?.projectDir ||
-      !this.draft.workflow ||
-      !this.draft.workflowPhases
-    ) {
+    if (!this.draft?.projectDir || !this.draft.workflow || !this.draft.selectedWorkflow) {
       return this.resetDraftWithMessage("Runtime 初始化资料不完整，请重新描述任务。");
     }
 
@@ -312,7 +308,7 @@ export class IntakeAgent {
     if (
       !this.draft?.projectDir ||
       !this.draft.workflow ||
-      !this.draft.workflowPhases ||
+      !this.draft.selectedWorkflow ||
       !this.draft.artifactDir
     ) {
       return this.resetDraftWithMessage("Runtime 初始化资料缺失，无法启动任务。");
@@ -323,7 +319,9 @@ export class IntakeAgent {
       projectDir: this.draft.projectDir,
       artifactDir: this.draft.artifactDir,
       workflow: this.draft.workflow,
-      workflowPhases: this.draft.workflowPhases,
+      workflowPhases: this.draft.selectedWorkflow.phases,
+      workflowProfileId: this.draft.selectedWorkflow.name,
+      workflowProfileLabel: this.draft.selectedWorkflow.name,
       description: this.draft.description,
     });
 
@@ -334,7 +332,7 @@ export class IntakeAgent {
 
     const lines = [
       `Runtime 初始化成功：${buildResult.runtime.runtimeId}`,
-      `任务类型：${buildResult.runtime.projectConfig.workflow.label}`,
+      `任务 workflow：${buildResult.runtime.projectConfig.workflow.name}`,
       `流程编排：${buildResult.runtime.projectConfig.workflowProfileLabel} (${formatWorkflowPhases(buildResult.runtime.projectConfig.workflowPhases)})`,
       `工件目录：${buildResult.runtime.projectConfig.artifactDir}`,
       ...buildResult.capabilityWarnings.map((warning) => `说明：${warning}`),
@@ -534,35 +532,68 @@ export class IntakeAgent {
     return null;
   }
 
-  private confirmWorkflowProfile(): string[] {
-    this.pendingStep = "confirm_workflow_profile";
-    return [this.getWorkflowProfilePrompt()];
-  }
-
-  private handleWorkflowProfileConfirmation(input: string): string[] {
-    if (isTruthyAnswer(input) || /^(默认|default-v0\.1|default)$/i.test(input)) {
-      this.pendingStep = "collect_project_dir";
-      return [
-        "请提供目标项目目录。直接回车、输入“默认”或“当前目录”将使用当前工作目录。",
-      ];
+  private confirmRecommendedWorkflow(): string[] {
+    if (!this.draft?.selectedWorkflow) {
+      return this.resetDraftWithMessage("缺少已选 workflow，请重新描述任务。");
     }
 
-    if (isFalsyAnswer(input)) {
-      return [
-        "当前版本仅支持 default-workflow/v0.1 编排。若接受该编排请输入 y，或输入“取消任务”。",
-      ];
+    this.pendingStep = "collect_artifact_dir";
+    return this.buildArtifactDirPromptLines(
+      `已确认 workflow：${this.draft.selectedWorkflow.name}。`,
+    );
+  }
+
+  private applySelectedWorkflow(
+    workflow: ProjectWorkflowDefinition,
+    recommendationReason?: string,
+  ): void {
+    if (!this.draft) {
+      return;
+    }
+
+    this.draft = {
+      description: this.draft.description,
+      workflowCatalog: this.draft.workflowCatalog,
+      projectDir: this.draft.projectDir,
+      artifactDir: this.draft.artifactDir,
+      workflow: createProjectWorkflowSelection(
+        workflow,
+        inferWorkflowTaskType(workflow.description).taskType,
+      ),
+      selectedWorkflow: {
+        ...workflow,
+        phases: workflow.phases.map((phase) => ({ ...phase })),
+      },
+      recommendationReason,
+    };
+  }
+
+  private buildWorkflowSelectionPrompt(): string[] {
+    if (!this.draft?.workflowCatalog) {
+      return this.resetDraftWithMessage("缺少项目 workflow 配置，请重新描述任务。");
     }
 
     return [
-      "请确认是否使用当前 workflow 编排。可输入 y/n，或输入 default-v0.1。",
+      "请从当前项目配置中改选其他 workflow：",
+      ...this.draft.workflowCatalog.workflows.map(
+        (workflow, index) =>
+          `${index + 1}. ${workflow.name}：${workflow.description}`,
+      ),
+      "请输入 workflow 序号或名称。",
     ];
   }
 
-  private getWorkflowProfilePrompt(): string {
-    const phases = formatWorkflowPhases(
-      this.draft?.workflowPhases ?? createDefaultWorkflowPhases(),
-    );
-    return `当前 workflow 编排将使用 default-workflow/v0.1：${phases}。是否确认？请回答 y/n。`;
+  private buildArtifactDirPromptLines(prefix: string): string[] {
+    if (!this.draft?.projectDir || !this.draft.selectedWorkflow) {
+      return this.resetDraftWithMessage("Runtime 初始化资料不完整，请重新描述任务。");
+    }
+
+    return [
+      prefix,
+      `workflow 描述：${this.draft.selectedWorkflow.description}`,
+      `流程编排：${formatWorkflowPhases(this.draft.selectedWorkflow.phases)}`,
+      `请提供工件保存目录。直接回车将使用默认目录：${path.resolve(this.draft.projectDir, DEFAULT_ARTIFACT_DIR_NAME)}`,
+    ];
   }
 
   private getResumeIndexPath(): string {
@@ -641,34 +672,143 @@ function normalizeArtifactInput(input: string): string | undefined {
   return input;
 }
 
-function parseWorkflowSelectionInput(input: string): WorkflowTaskType | null {
+function resolveWorkflowSelection(
+  input: string,
+  workflows?: ProjectWorkflowDefinition[],
+): ProjectWorkflowDefinition | null {
+  if (!workflows || workflows.length === 0) {
+    return null;
+  }
+
   const normalized = input.trim().toLowerCase();
+  const isStrictInteger = /^\d+$/u.test(normalized);
+  const numericIndex = isStrictInteger ? Number(normalized) : Number.NaN;
 
-  if (
-    normalized.includes("bugfix") ||
-    normalized.includes("bug") ||
-    normalized.includes("修复")
-  ) {
-    return "bugfix";
+  if (Number.isInteger(numericIndex) && numericIndex >= 1 && numericIndex <= workflows.length) {
+    return workflows[numericIndex - 1];
   }
 
-  if (
-    normalized.includes("small new feature") ||
-    normalized.includes("new feature") ||
-    normalized.includes("新增") ||
-    normalized.includes("新功能")
-  ) {
-    return "small_new_feature";
+  return (
+    workflows.find((workflow) => workflow.name.trim().toLowerCase() === normalized) ??
+    null
+  );
+}
+
+function recommendProjectWorkflow(
+  description: string,
+  workflows: ProjectWorkflowDefinition[],
+): {
+  workflow: ProjectWorkflowDefinition;
+  reason: string;
+} {
+  const scoredWorkflows = workflows.map((workflow) => {
+    const descriptionScore = scoreDescriptionMatch(
+      description,
+      workflow.description,
+    );
+    const userGuess = inferWorkflowTaskType(description);
+    const workflowGuess = inferWorkflowTaskType(workflow.description);
+    const taskTypeBonus =
+      workflowGuess.taskType === userGuess.taskType
+        ? confidenceToScore(userGuess.confidence) + confidenceToScore(workflowGuess.confidence)
+        : 0;
+
+    return {
+      workflow,
+      score: descriptionScore + taskTypeBonus,
+      descriptionScore,
+    };
+  });
+
+  scoredWorkflows.sort((left, right) => right.score - left.score);
+  const selected = scoredWorkflows[0];
+
+  return {
+    workflow: selected.workflow,
+    reason:
+      selected.descriptionScore > 0
+        ? `当前需求与该 workflow description 的文本匹配度最高：${selected.workflow.description}`
+        : `该 workflow description 与当前需求最接近：${selected.workflow.description}`,
+  };
+}
+
+function confidenceToScore(confidence: "high" | "medium" | "low"): number {
+  switch (confidence) {
+    case "high":
+      return 3;
+    case "medium":
+      return 2;
+    default:
+      return 1;
+  }
+}
+
+function scoreDescriptionMatch(input: string, candidate: string): number {
+  const inputTerms = extractDescriptionTerms(input);
+  const candidateTerms = extractDescriptionTerms(candidate);
+  const sharedTerms = countSharedTerms(inputTerms, candidateTerms);
+  const sharedBigrams = countSharedTerms(
+    extractDescriptionBigrams(input),
+    extractDescriptionBigrams(candidate),
+  );
+
+  return sharedTerms * 5 + sharedBigrams;
+}
+
+function extractDescriptionTerms(value: string): Set<string> {
+  const normalized = normalizeDescriptionText(value);
+  const terms = new Set<string>();
+  const englishTerms = normalized.match(/[a-z0-9]{2,}/g) ?? [];
+
+  for (const term of englishTerms) {
+    terms.add(term);
   }
 
-  if (
-    normalized.includes("feature change") ||
-    normalized.includes("change") ||
-    normalized.includes("调整") ||
-    normalized.includes("修改")
-  ) {
-    return "feature_change";
+  const chineseTerms = normalized.match(/[\u4e00-\u9fff]{2,}/g) ?? [];
+
+  for (const term of chineseTerms) {
+    for (let index = 0; index < term.length - 1; index += 1) {
+      terms.add(term.slice(index, index + 2));
+    }
   }
 
-  return null;
+  return terms;
+}
+
+function extractDescriptionBigrams(value: string): Set<string> {
+  const normalized = normalizeDescriptionText(value).replace(/\s+/g, "");
+  const bigrams = new Set<string>();
+
+  for (let index = 0; index < normalized.length - 1; index += 1) {
+    bigrams.add(normalized.slice(index, index + 2));
+  }
+
+  return bigrams;
+}
+
+function normalizeDescriptionText(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+}
+
+function countSharedTerms(left: Set<string>, right: Set<string>): number {
+  let count = 0;
+
+  for (const term of left) {
+    if (right.has(term)) {
+      count += 1;
+    }
+  }
+
+  return count;
+}
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return "发生未知错误，请检查项目配置后重试。";
 }
