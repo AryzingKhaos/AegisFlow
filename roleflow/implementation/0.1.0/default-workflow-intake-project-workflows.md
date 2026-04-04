@@ -122,18 +122,18 @@ flowchart TD
 
 ## Todolist (todoList)
 
-- [ ] 盘点 `IntakeAgent`、`shared/utils`、`shared/constants`、`runtime/builder` 中所有仍默认依赖内置 workflow 选择与默认 phase 编排的实现点。
-- [ ] 设计项目侧 workflow catalog 的最小类型与内存结构，至少覆盖 `workflows` 列表、workflow `name/description/phases` 以及 phase 最小字段。
-- [ ] 为 `.aegisflow/aegisproject.yaml` 新增 workflow catalog 读取入口，并与现有 roles.executor 配置解析职责分离。
-- [ ] 实现 workflow catalog 结构校验，至少覆盖 `workflows` 存在性、非空列表、`description` 非空、`phases` 合法，以及 phase 必填字段。
-- [ ] 为非法 workflow 配置定义统一错误语义，确保错误明确指向需要用户修正 `.aegisflow/aegisproject.yaml`，而不是泛化成普通系统错误。
-- [ ] 修改 `IntakeAgent` 的 workflow 推荐流程，改为基于“用户需求 + workflow.description”生成 `Recommended Workflow`，不再直接使用内置默认 workflow 作为推荐来源。
-- [ ] 修改推荐结果展示文案，明确输出推荐 workflow 名称和推荐理由，而不是只展示任务类型判断。
-- [ ] 修改确认链路，使推荐结果在用户确认前不是最终选择，并支持用户从当前 catalog 的其他合法 workflow 中改选。
-- [ ] 为改选交互设计输入约束，明确如何列出可选 workflow、如何识别用户选择、以及非法选择时的提示语义。
-- [ ] 收敛 `WorkflowSelection` 或等价运行时结构，使其能表达项目侧 Selected Workflow，而不再只表达系统内置 taskType 标签。
-- [ ] 修改 Runtime 初始化输入组装逻辑，确保 `buildRuntimeForNewTask()` 接收的 `workflow` 与 `workflowPhases` 来自 Selected Workflow，而不是 `createDefaultWorkflowPhases()`。
-- [ ] 移除或封堵 workflow 选择链路中的静默默认回退，确保配置非法、缺失 `description` 或 catalog 不存在时不会继续启动任务。
-- [ ] 同步更新 `.aegisflow/aegisproject.yaml` 示例与相关文档，收敛到 `workflows` 复数结构，不再延续单个 `workflow:` 示例。
-- [ ] 更新或新增测试，覆盖 catalog 读取、非法配置阻断、description 推荐、确认/改选、Selected Workflow 写入 Runtime、以及无默认回退路径。
-- [ ] 完成自检，确认本次改造没有把 workflow 内部 phase 语义重新写死到 Intake，也没有保留隐藏的默认 workflow 降级路径。
+- [x] 盘点 `IntakeAgent`、`shared/utils`、`shared/constants`、`runtime/builder` 中所有仍默认依赖内置 workflow 选择与默认 phase 编排的实现点。
+- [x] 设计项目侧 workflow catalog 的最小类型与内存结构，至少覆盖 `workflows` 列表、workflow `name/description/phases` 以及 phase 最小字段。
+- [x] 为 `.aegisflow/aegisproject.yaml` 新增 workflow catalog 读取入口，并与现有 roles.executor 配置解析职责分离。
+- [x] 实现 workflow catalog 结构校验，至少覆盖 `workflows` 存在性、非空列表、`description` 非空、`phases` 合法，以及 phase 必填字段。
+- [x] 为非法 workflow 配置定义统一错误语义，确保错误明确指向需要用户修正 `.aegisflow/aegisproject.yaml`，而不是泛化成普通系统错误。
+- [x] 修改 `IntakeAgent` 的 workflow 推荐流程，改为基于“用户需求 + workflow.description”生成 `Recommended Workflow`，不再直接使用内置默认 workflow 作为推荐来源。
+- [x] 修改推荐结果展示文案，明确输出推荐 workflow 名称和推荐理由，而不是只展示任务类型判断。
+- [x] 修改确认链路，使推荐结果在用户确认前不是最终选择，并支持用户从当前 catalog 的其他合法 workflow 中改选。
+- [x] 为改选交互设计输入约束，明确如何列出可选 workflow、如何识别用户选择、以及非法选择时的提示语义。
+- [x] 收敛 `WorkflowSelection` 或等价运行时结构，使其能表达项目侧 Selected Workflow，而不再只表达系统内置 taskType 标签。
+- [x] 修改 Runtime 初始化输入组装逻辑，确保 `buildRuntimeForNewTask()` 接收的 `workflow` 与 `workflowPhases` 来自 Selected Workflow，而不是 `createDefaultWorkflowPhases()`。
+- [x] 移除或封堵 workflow 选择链路中的静默默认回退，确保配置非法、缺失 `description` 或 catalog 不存在时不会继续启动任务。
+- [x] 同步更新 `.aegisflow/aegisproject.yaml` 示例与相关文档，收敛到 `workflows` 复数结构，不再延续单个 `workflow:` 示例。
+- [x] 更新或新增测试，覆盖 catalog 读取、非法配置阻断、description 推荐、确认/改选、Selected Workflow 写入 Runtime、以及无默认回退路径。
+- [x] 完成自检，确认本次改造没有把 workflow 内部 phase 语义重新写死到 Intake，也没有保留隐藏的默认 workflow 降级路径。

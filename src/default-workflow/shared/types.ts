@@ -5,7 +5,7 @@ export type WorkflowTaskType =
   | "bugfix"
   | "small_new_feature";
 
-export type WorkflowName = "default-workflow";
+export type WorkflowName = string;
 
 export type Phase =
   | "clarify"
@@ -57,8 +57,11 @@ export interface TaskState {
 
 export interface WorkflowSelection {
   id: WorkflowName;
-  taskType: WorkflowTaskType;
+  name: string;
   label: string;
+  description: string;
+  taskType?: WorkflowTaskType;
+  source: "default" | "project_config";
 }
 
 export interface WorkflowPhaseConfig {
@@ -66,6 +69,17 @@ export interface WorkflowPhaseConfig {
   hostRole: RoleName;
   needApproval: boolean;
   pauseForInput?: boolean;
+}
+
+export interface ProjectWorkflowDefinition {
+  name: string;
+  description: string;
+  phases: WorkflowPhaseConfig[];
+}
+
+export interface ProjectWorkflowCatalog {
+  configPath: string;
+  workflows: ProjectWorkflowDefinition[];
 }
 
 export interface ProjectConfig {

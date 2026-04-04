@@ -239,7 +239,8 @@ describe("role layer", () => {
       "utf8",
     );
 
-    expect(configContent).toContain('type: "default-workflow"');
+    expect(configContent).toContain("workflows:");
+    expect(configContent).toContain('name: "bugfix-workflow"');
     expect(configContent).toContain('artifactDir: ".aegisflow/artifacts"');
     expect(configContent).toContain('snapshotDir: ".aegisflow/state"');
     expect(configContent).toContain('logDir: ".aegisflow/logs"');

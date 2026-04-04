@@ -14,12 +14,16 @@ import {
 import type {
   PersistedTaskContext,
   ProjectConfig,
-  RoleExecutorConfig,
   Runtime,
   WorkflowPhaseConfig,
   WorkflowSelection,
 } from "../shared/types";
 import { DefaultRoleRegistry, JsonlEventLogger } from "./dependencies";
+import {
+  loadProjectRoleExecutorConfig,
+  loadProjectWorkflowCatalog,
+  type ProjectRoleExecutorOverride,
+} from "./project-config";
 
 export interface BuildNewRuntimeInput {
   projectDir: string;
@@ -42,11 +46,6 @@ export interface RuntimeBuildResult {
   capabilityWarnings: string[];
 }
 
-type PartialRoleExecutorConfig = {
-  transport?: Partial<RoleExecutorConfig["transport"]>;
-  provider?: Partial<RoleExecutorConfig["provider"]>;
-};
-
 export async function buildRuntimeForNewTask(
   input: BuildNewRuntimeInput,
 ): Promise<RuntimeBuildResult> {
@@ -60,7 +59,7 @@ export async function buildRuntimeForNewTask(
   const runtimeId = createRuntimeId();
   const title = createTaskTitle(
     input.description,
-    `${input.workflow.taskType}_task`,
+    `${input.workflow.taskType ?? input.workflow.name ?? "workflow"}_task`,
   );
   const taskId = await createNextTaskId(input.artifactDir, title);
   // Runtime 装配顺序固定为：
@@ -253,7 +252,7 @@ async function validateRuntimeInput(
     throw new Error(`Project directory is not accessible: ${resolvedProjectDir}`);
   }
 
-  if (!workflow?.id || !workflow?.taskType || !workflow?.label) {
+  if (!workflow?.id || !workflow?.name || !workflow?.label || !workflow?.description) {
     throw new Error("Workflow configuration is missing or invalid.");
   }
 
@@ -316,8 +315,8 @@ function createArtifactLookupProjectConfig(artifactDir: string): ProjectConfig {
 
 async function resolveProjectRoleExecutorConfig(
   projectDir: string,
-): Promise<PartialRoleExecutorConfig | undefined> {
-  const yamlOverride = await loadRoleExecutorConfigFromYaml(projectDir);
+): Promise<ProjectRoleExecutorOverride | undefined> {
+  const yamlOverride = await loadProjectRoleExecutorConfig(projectDir);
 
   if (!yamlOverride) {
     return undefined;
@@ -326,287 +325,4 @@ async function resolveProjectRoleExecutorConfig(
   return yamlOverride;
 }
 
-async function loadRoleExecutorConfigFromYaml(
-  projectDir: string,
-): Promise<PartialRoleExecutorConfig | undefined> {
-  const configPath = path.join(
-    path.resolve(projectDir),
-    ".aegisflow",
-    "aegisproject.yaml",
-  );
-
-  try {
-    const content = await fs.readFile(configPath, "utf8");
-    return parseRoleExecutorConfig(content);
-  } catch {
-    return undefined;
-  }
-}
-
-function parseRoleExecutorConfig(
-  content: string,
-): PartialRoleExecutorConfig | undefined {
-  const result: PartialRoleExecutorConfig = {};
-  let inRolesBlock = false;
-  let inExecutorBlock = false;
-  let executorChildBlock: "transport" | "provider" | undefined;
-  let inTransportEnvBlock = false;
-
-  for (const rawLine of content.split(/\r?\n/u)) {
-    const trimmedLine = rawLine.trim();
-
-    if (!trimmedLine || trimmedLine.startsWith("#")) {
-      continue;
-    }
-
-    const indent = getYamlIndent(rawLine);
-
-    if (indent === 0) {
-      inRolesBlock = trimmedLine === "roles:";
-      inExecutorBlock = false;
-      executorChildBlock = undefined;
-      inTransportEnvBlock = false;
-      continue;
-    }
-
-    if (!inRolesBlock) {
-      continue;
-    }
-
-    if (indent === 2) {
-      executorChildBlock = undefined;
-      inTransportEnvBlock = false;
-      inExecutorBlock = trimmedLine === "executor:";
-      continue;
-    }
-
-    if (!inExecutorBlock) {
-      continue;
-    }
-
-    if (indent === 4) {
-      executorChildBlock = undefined;
-      inTransportEnvBlock = false;
-
-      if (trimmedLine === "transport:") {
-        executorChildBlock = "transport";
-        result.transport = {
-          type: "child_process",
-          ...(result.transport ?? {}),
-        };
-        continue;
-      }
-
-      if (trimmedLine === "provider:") {
-        executorChildBlock = "provider";
-        result.provider = {
-          type: "codex",
-          ...(result.provider ?? {}),
-        };
-        continue;
-      }
-
-      const keyValue = splitYamlKeyValue(trimmedLine);
-
-      if (!keyValue) {
-        continue;
-      }
-
-      const value = parseYamlScalar(keyValue.value);
-
-      switch (keyValue.key) {
-        case "command":
-          if (typeof value === "string") {
-            result.provider = {
-              type: "codex",
-              ...(result.provider ?? {}),
-              command: value,
-            };
-          }
-          break;
-        case "cwd":
-          if (typeof value === "string") {
-            result.transport = {
-              type: "child_process",
-              ...(result.transport ?? {}),
-              cwd: value,
-            };
-          }
-          break;
-        case "timeoutMs":
-          if (typeof value === "number") {
-            result.transport = {
-              type: "child_process",
-              ...(result.transport ?? {}),
-              timeoutMs: value,
-            };
-          }
-          break;
-        default:
-          break;
-      }
-
-      continue;
-    }
-
-    if (indent === 6 && executorChildBlock === "transport") {
-      inTransportEnvBlock = trimmedLine === "env:";
-
-      if (inTransportEnvBlock) {
-        continue;
-      }
-
-      const keyValue = splitYamlKeyValue(trimmedLine);
-
-      if (!keyValue) {
-        continue;
-      }
-
-      const value = parseYamlScalar(keyValue.value);
-
-      switch (keyValue.key) {
-        case "type":
-          if (value === "child_process") {
-            result.transport = {
-              type: "child_process",
-              ...(result.transport ?? {}),
-            };
-          }
-          break;
-        case "cwd":
-          if (typeof value === "string") {
-            result.transport = {
-              type: "child_process",
-              ...(result.transport ?? {}),
-              cwd: value,
-            };
-          }
-          break;
-        case "timeoutMs":
-          if (typeof value === "number") {
-            result.transport = {
-              type: "child_process",
-              ...(result.transport ?? {}),
-              timeoutMs: value,
-            };
-          }
-          break;
-        default:
-          break;
-      }
-
-      continue;
-    }
-
-    if (indent === 6 && executorChildBlock === "provider") {
-      const keyValue = splitYamlKeyValue(trimmedLine);
-
-      if (!keyValue) {
-        continue;
-      }
-
-      const value = parseYamlScalar(keyValue.value);
-
-      switch (keyValue.key) {
-        case "type":
-          if (value === "codex") {
-            result.provider = {
-              type: "codex",
-              ...(result.provider ?? {}),
-            };
-          }
-          break;
-        case "command":
-          if (typeof value === "string") {
-            result.provider = {
-              type: "codex",
-              ...(result.provider ?? {}),
-              command: value,
-            };
-          }
-          break;
-        default:
-          break;
-      }
-
-      continue;
-    }
-
-    if (inTransportEnvBlock && indent === 8) {
-      const keyValue = splitYamlKeyValue(trimmedLine);
-
-      if (!keyValue) {
-        continue;
-      }
-
-      const value = parseYamlScalar(keyValue.value);
-
-      if (keyValue.key === "passthrough" && typeof value === "boolean") {
-        result.transport = {
-          type: "child_process",
-          ...(result.transport ?? {}),
-          env: {
-            ...(result.transport?.env ?? {}),
-            passthrough: value,
-          },
-        };
-      }
-    }
-  }
-
-  return Object.keys(result).length > 0 ? result : undefined;
-}
-
-function getYamlIndent(line: string): number {
-  let indent = 0;
-
-  while (indent < line.length && line[indent] === " ") {
-    indent += 1;
-  }
-
-  return indent;
-}
-
-function splitYamlKeyValue(
-  line: string,
-): { key: string; value: string } | null {
-  const separatorIndex = line.indexOf(":");
-
-  if (separatorIndex <= 0) {
-    return null;
-  }
-
-  return {
-    key: line.slice(0, separatorIndex).trim(),
-    value: line.slice(separatorIndex + 1).trim(),
-  };
-}
-
-function parseYamlScalar(value: string): string | number | boolean | undefined {
-  const normalized = value.replace(/\s+#.*$/u, "").trim();
-
-  if (!normalized) {
-    return undefined;
-  }
-
-  if (
-    (normalized.startsWith('"') && normalized.endsWith('"')) ||
-    (normalized.startsWith("'") && normalized.endsWith("'"))
-  ) {
-    return normalized.slice(1, -1);
-  }
-
-  if (normalized === "true") {
-    return true;
-  }
-
-  if (normalized === "false") {
-    return false;
-  }
-
-  if (/^-?\d+$/u.test(normalized)) {
-    return Number(normalized);
-  }
-
-  return normalized;
-}
+export { loadProjectWorkflowCatalog };

@@ -8,33 +8,88 @@ paths:
   snapshotDir: ".aegisflow/state"
   logDir: ".aegisflow/logs"
 
-workflow:
-  type: "default-workflow"
-  phases:
-    - name: "clarify"
-      hostRole: "clarifier"
-      needApproval: false
-    - name: "explore"
-      hostRole: "explorer"
-      needApproval: false
-    - name: "plan"
-      hostRole: "planner"
-      needApproval: true
-    - name: "build"
-      hostRole: "builder"
-      needApproval: false
-    - name: "review"
-      hostRole: "critic"
-      needApproval: true
-    - name: "test-design"
-      hostRole: "test-designer"
-      needApproval: false
-    - name: "unit-test"
-      hostRole: "test-writer"
-      needApproval: false
-    - name: "test"
-      hostRole: "tester"
-      needApproval: false
+workflows:
+  - name: "feature-change-workflow"
+    description: "已有功能点的规则修改、页面适配或联动逻辑调整。"
+    phases:
+      - name: "clarify"
+        hostRole: "clarifier"
+        needApproval: false
+      - name: "explore"
+        hostRole: "explorer"
+        needApproval: false
+      - name: "plan"
+        hostRole: "planner"
+        needApproval: true
+      - name: "build"
+        hostRole: "builder"
+        needApproval: false
+      - name: "review"
+        hostRole: "critic"
+        needApproval: true
+      - name: "test-design"
+        hostRole: "test-designer"
+        needApproval: false
+      - name: "unit-test"
+        hostRole: "test-writer"
+        needApproval: false
+      - name: "test"
+        hostRole: "tester"
+        needApproval: false
+  - name: "bugfix-workflow"
+    description: "已有问题修复、边界情况修复或回归问题修复。"
+    phases:
+      - name: "clarify"
+        hostRole: "clarifier"
+        needApproval: false
+      - name: "explore"
+        hostRole: "explorer"
+        needApproval: false
+      - name: "plan"
+        hostRole: "planner"
+        needApproval: true
+      - name: "build"
+        hostRole: "builder"
+        needApproval: false
+      - name: "review"
+        hostRole: "critic"
+        needApproval: true
+      - name: "test-design"
+        hostRole: "test-designer"
+        needApproval: false
+      - name: "unit-test"
+        hostRole: "test-writer"
+        needApproval: false
+      - name: "test"
+        hostRole: "tester"
+        needApproval: false
+  - name: "small-new-feature-workflow"
+    description: "较小范围的新功能点开发。"
+    phases:
+      - name: "clarify"
+        hostRole: "clarifier"
+        needApproval: false
+      - name: "explore"
+        hostRole: "explorer"
+        needApproval: false
+      - name: "plan"
+        hostRole: "planner"
+        needApproval: true
+      - name: "build"
+        hostRole: "builder"
+        needApproval: false
+      - name: "review"
+        hostRole: "critic"
+        needApproval: true
+      - name: "test-design"
+        hostRole: "test-designer"
+        needApproval: false
+      - name: "unit-test"
+        hostRole: "test-writer"
+        needApproval: false
+      - name: "test"
+        hostRole: "tester"
+        needApproval: false
 
 roles:
   prototypeDir: "/Users/aaron/code/roleflow/roles"
