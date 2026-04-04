@@ -88,4 +88,7 @@ declare const console: {
   error(message?: unknown, ...optionalParams: unknown[]): void;
 };
 
+declare function setInterval(handler: () => void, timeout?: number): unknown;
+declare function clearInterval(timer: unknown): void;
+
 declare const __dirname: string;

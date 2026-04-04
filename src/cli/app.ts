@@ -74,6 +74,7 @@ const THEME = {
 };
 
 const MAX_VISIBLE_INTERMEDIATE_LINES = 3;
+const SPINNER_FRAMES = ["-", "\\", "|", "/"];
 
 export async function runCliApp(): Promise<unknown> {
   if (!renderApp) {
@@ -354,7 +355,28 @@ function ContentSection(input: {
 }
 
 function OutputPanel(input: { viewModel: CliViewModel }): unknown {
-  const entries = buildOutputEntries(input.viewModel);
+  const isRunning = input.viewModel.taskStatus === "running";
+  const [spinnerIndex, setSpinnerIndex] = React.useState(0);
+
+  React.useEffect(() => {
+    if (!isRunning) {
+      setSpinnerIndex(0);
+      return;
+    }
+
+    const timer = setInterval(() => {
+      setSpinnerIndex((previous) => (previous + 1) % SPINNER_FRAMES.length);
+    }, 120);
+
+    return () => {
+      clearInterval(timer);
+    };
+  }, [isRunning]);
+
+  const intermediateLabel = isRunning
+    ? `${SPINNER_FRAMES[spinnerIndex]} [过程输出]`
+    : "[过程输出]";
+  const entries = buildOutputEntries(input.viewModel, intermediateLabel);
 
   return h(ContentSection, {
     title: "输出",
@@ -406,7 +428,10 @@ function LabeledBlock(input: {
   );
 }
 
-function buildOutputEntries(viewModel: CliViewModel): unknown[] {
+function buildOutputEntries(
+  viewModel: CliViewModel,
+  intermediateLabel: string,
+): unknown[] {
   const flattenedIntermediateLines = viewModel.intermediateLines.flatMap((line) =>
     normalizeDisplayNewlines(line).split("\n"),
   );
@@ -439,7 +464,7 @@ function buildOutputEntries(viewModel: CliViewModel): unknown[] {
       ? [
           h(LabeledBlock, {
             key: "intermediate_group",
-            label: "[过程输出]",
+            label: intermediateLabel,
             color: THEME.intermediate,
             value: hasOmittedIntermediateLines
               ? `${visibleIntermediateLines.join("\n")}\n...`
