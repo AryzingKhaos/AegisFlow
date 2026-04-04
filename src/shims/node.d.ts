@@ -79,6 +79,8 @@ declare const process: {
   stdin: unknown;
   stdout: unknown;
   exitCode: number;
+  on?(eventName: "SIGINT", listener: () => void): unknown;
+  removeListener?(eventName: "SIGINT", listener: () => void): unknown;
 };
 
 declare const console: {

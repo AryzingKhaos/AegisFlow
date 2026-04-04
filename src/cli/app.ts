@@ -66,10 +66,14 @@ const THEME = {
   muted: "#a8a29e",
   subdued: "#78716c",
   intermediate: "#9ca3af",
+  skeleton: "#93c5fd",
+  result: "#e7e5e4",
   error: "#f87171",
   border: "#450a0a",
   panel: "#1c1917",
 };
+
+const MAX_VISIBLE_INTERMEDIATE_LINES = 3;
 
 export async function runCliApp(): Promise<unknown> {
   if (!renderApp) {
@@ -93,6 +97,7 @@ function IntakeInkApp(): unknown {
   );
   const pendingWorkRef = React.useRef(Promise.resolve());
   const pendingLiveInputRef = React.useRef(Promise.resolve());
+  const interruptPendingRef = React.useRef(false);
   const isDisposedRef = React.useRef(false);
   const agentRef = React.useRef<IntakeAgent | null>(null);
 
@@ -114,7 +119,15 @@ function IntakeInkApp(): unknown {
       appendSystemLines(previous, agent.getBootstrapLines(), "启动信息"),
     );
 
+    const handleSigint = () => {
+      requestInterrupt();
+    };
+
+    process.on?.("SIGINT", handleSigint);
+
     return () => {
+      process.removeListener?.("SIGINT", handleSigint);
+
       if (isDisposedRef.current) {
         return;
       }
@@ -126,15 +139,7 @@ function IntakeInkApp(): unknown {
 
   useInput((typedInput, key) => {
     if (key.ctrl && typedInput.toLowerCase() === "c") {
-      enqueue(async () => {
-        const result = await agent.handleInterruptSignal();
-        pushSystemLines(result.lines, "中断结果");
-
-        if (result.shouldExit) {
-          await disposeAgent();
-          exit();
-        }
-      });
+      requestInterrupt();
       return;
     }
 
@@ -182,54 +187,8 @@ function IntakeInkApp(): unknown {
         flexDirection: "column",
         marginTop: 1,
       },
-      h(ContentSection, {
-        title: "结果与事件",
-        borderColor: THEME.border,
-        children: [
-          viewModel.finalBlocks.length > 0
-            ? viewModel.finalBlocks.map((block) =>
-                h(ResultBlock, {
-                  key: block.id,
-                  block,
-                }),
-              )
-            : [
-                h(
-                  Text,
-                  {
-                    key: "empty-results",
-                    color: THEME.subdued,
-                  },
-                  "等待输入。",
-                ),
-              ],
-        ].flat(),
-      }),
-      h(ContentSection, {
-        title: "骨架事件",
-        borderColor: THEME.border,
-        marginTop: 1,
-        children:
-          viewModel.skeletonBlocks.length > 0
-            ? viewModel.skeletonBlocks.map((block) =>
-                h(SkeletonBlock, {
-                  key: block.id,
-                  block,
-                }),
-              )
-            : [
-                h(
-                  Text,
-                  {
-                    key: "empty-skeleton",
-                    color: THEME.subdued,
-                  },
-                  "暂无骨架事件。",
-                ),
-              ],
-      }),
-      h(IntermediateOutputPanel, {
-        lines: viewModel.intermediateLines,
+      h(OutputPanel, {
+        viewModel,
       }),
     ),
     h(InputBar, {
@@ -286,6 +245,27 @@ function IntakeInkApp(): unknown {
 
   function pushSystemLines(lines: string[], title: string): void {
     setViewModel((previous) => appendSystemLines(previous, lines, title));
+  }
+
+  function requestInterrupt(): void {
+    if (interruptPendingRef.current) {
+      return;
+    }
+
+    interruptPendingRef.current = true;
+    enqueue(async () => {
+      try {
+        const result = await agent.handleInterruptSignal();
+        pushSystemLines(result.lines, "中断结果");
+
+        if (result.shouldExit) {
+          await disposeAgent();
+          exit();
+        }
+      } finally {
+        interruptPendingRef.current = false;
+      }
+    });
   }
 }
 
@@ -373,96 +353,101 @@ function ContentSection(input: {
   );
 }
 
-function ResultBlock(input: { block: UiBlock }): unknown {
-  return h(
-    Box,
-    {
-      marginBottom: 1,
-      flexDirection: "column",
-    },
-    h(
-      Text,
-      {
-        color: resolveToneColor(input.block.tone),
-        bold: input.block.tone !== "muted",
-      },
-      input.block.title,
-    ),
-    h(
-      Text,
-      {
-        color: THEME.text,
-      },
-      input.block.body,
-    ),
-  );
-}
+function OutputPanel(input: { viewModel: CliViewModel }): unknown {
+  const entries = buildOutputEntries(input.viewModel);
 
-function SkeletonBlock(input: { block: UiBlock }): unknown {
-  return h(
-    Box,
-    {
-      marginBottom: 1,
-      flexDirection: "column",
-    },
-    h(
-      Text,
-      {
-        color: THEME.subdued,
-      },
-      `${input.block.title} · ${input.block.body}`,
-    ),
-  );
-}
-
-function IntermediateOutputPanel(input: { lines: string[] }): unknown {
-  return h(
-    Box,
-    {
-      marginTop: 1,
-      borderStyle: "round",
-      borderColor: THEME.border,
-      flexDirection: "column",
-      paddingX: 1,
-      paddingY: 0,
-    },
-    h(
-      Text,
-      {
-        color: THEME.accentSoft,
-        bold: true,
-      },
-      "过程输出",
-    ),
-    h(
-      Box,
-      {
-        marginTop: 1,
-        flexDirection: "column",
-      },
-      ...(input.lines.length > 0
-        ? input.lines.map((line, index) =>
-            h(
-              Text,
-              {
-                key: `intermediate_${String(index)}`,
-                color: THEME.intermediate,
-              },
-              line,
-            ),
-          )
+  return h(ContentSection, {
+    title: "输出",
+    borderColor: THEME.border,
+    children:
+      entries.length > 0
+        ? entries
         : [
             h(
               Text,
               {
-                key: "empty-intermediate",
+                key: "empty-output",
                 color: THEME.subdued,
               },
-              "暂无中间输出。",
+              "等待输入。",
             ),
-          ]),
+          ],
+  });
+}
+
+function LabeledBlock(input: {
+  label: string;
+  value: string;
+  color: string;
+  bold?: boolean;
+}): unknown {
+  const prefix = `${input.label} `;
+  const padding = " ".repeat(prefix.length);
+  const normalizedValue = normalizeDisplayNewlines(input.value);
+  const lines = normalizedValue.length > 0 ? normalizedValue.split("\n") : [""];
+
+  return h(
+    Box,
+    {
+      marginBottom: 1,
+      flexDirection: "column",
+    },
+    ...lines.map((line, index) =>
+      h(
+        Text,
+        {
+          key: `line_${String(index)}`,
+          color: input.color,
+          bold: input.bold ?? false,
+        },
+        `${index === 0 ? prefix : padding}${line}`,
+      ),
     ),
   );
+}
+
+function buildOutputEntries(viewModel: CliViewModel): unknown[] {
+  const flattenedIntermediateLines = viewModel.intermediateLines.flatMap((line) =>
+    normalizeDisplayNewlines(line).split("\n"),
+  );
+  const visibleIntermediateLines = flattenedIntermediateLines.slice(
+    0,
+    MAX_VISIBLE_INTERMEDIATE_LINES,
+  );
+  const hasOmittedIntermediateLines =
+    flattenedIntermediateLines.length > MAX_VISIBLE_INTERMEDIATE_LINES;
+
+  return [
+    ...viewModel.finalBlocks.map((block) =>
+      h(LabeledBlock, {
+        key: block.id,
+        label: "[结果输出]",
+        color: resolveFinalBlockColor(block.tone),
+        value: block.title ? `${block.title} [${block.body}]` : block.body,
+        bold: block.tone !== "muted",
+      }),
+    ),
+    ...viewModel.skeletonBlocks.map((block) =>
+      h(LabeledBlock, {
+        key: block.id,
+        label: "[骨架输出]",
+        color: THEME.skeleton,
+        value: formatSkeletonBlockValue(block),
+      }),
+    ),
+    ...(visibleIntermediateLines.length > 0
+      ? [
+          h(LabeledBlock, {
+            key: "intermediate_group",
+            label: "[过程输出]",
+            color: THEME.intermediate,
+            value: hasOmittedIntermediateLines
+              ? `${visibleIntermediateLines.join("\n")}\n...`
+              : visibleIntermediateLines.join("\n"),
+          }),
+        ]
+      : []),
+  ];
 }
 
 function InputBar(input: {
@@ -509,6 +494,8 @@ function resolveToneColor(tone: UiBlock["tone"]): string {
   switch (tone) {
     case "accent":
       return THEME.accentSoft;
+    case "result":
+      return THEME.result;
     case "error":
       return THEME.error;
     case "muted":
@@ -516,4 +503,44 @@ function resolveToneColor(tone: UiBlock["tone"]): string {
     default:
       return THEME.text;
   }
+}
+
+function resolveFinalBlockColor(tone: UiBlock["tone"]): string {
+  if (tone === "error") {
+    return THEME.error;
+  }
+
+  if (tone === "accent") {
+    return THEME.accentSoft;
+  }
+
+  return THEME.result;
+}
+
+function formatSkeletonBlockValue(block: UiBlock): string {
+  const body = formatSkeletonBodyForDisplay(block.body);
+
+  if (!block.title) {
+    return body;
+  }
+
+  if (!body) {
+    return block.title;
+  }
+
+  return `${block.title}\n${body}`;
+}
+
+function formatSkeletonBodyForDisplay(body: string): string {
+  return normalizeDisplayNewlines(body)
+    .replace(/，(?=(当前|目标|工件|状态|阶段|角色|结果|原因|恢复点))/g, "，\n")
+    .replace(/。(?=(当前|目标|工件|状态|阶段|角色|结果|原因|恢复点))/g, "。\n")
+    .replace(
+      /,(?=\s*(currentPhase|status|phaseStatus|resumeFrom|artifactPath|roleName|phase)\b)/g,
+      ",\n",
+    );
+}
+
+function normalizeDisplayNewlines(value: string): string {
+  return value.replace(/\\r\\n/g, "\n").replace(/\\n/g, "\n");
 }
