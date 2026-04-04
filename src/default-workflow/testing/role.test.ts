@@ -368,6 +368,9 @@ describe("role layer", () => {
     expect(result.metadata?.agentModel).toBe("codex-5.4");
     expect(observedPrompt).toContain("SYSTEM_PROMPT");
     expect(observedPrompt).toContain("design_plan");
+    expect(observedPrompt).toContain(
+      "artifacts 必须优先返回给人看的 Markdown 正文，不能把完整 RoleResult JSON 包络再塞进 artifacts。",
+    );
     expect(visibleOutputs).toEqual([
       "角色 planner 已开始执行，当前阶段：plan。",
       "planner 已通过 agent 输出计划",
@@ -444,6 +447,9 @@ describe("role layer", () => {
 
     expect(observedPrompt).toContain("## Clarify 最终 PRD 生成约束");
     expect(observedPrompt).toContain("你必须直接输出最终 PRD 内容到 artifacts[0]");
+    expect(observedPrompt).toContain(
+      "artifacts[0] 必须是人类可直接阅读的 Markdown PRD 正文",
+    );
     expect(observedPrompt).not.toContain("metadata.decision 必须是 ask_next_question 或 ready_for_prd。");
     expect(observedPrompt).not.toContain("当 decision=ready_for_prd 时，不要直接输出最终 PRD");
   });
@@ -1007,7 +1013,9 @@ describe("role layer", () => {
       "explore-explorer-1.md",
     );
     const artifactContent = await readFile(artifactPath, "utf8");
-    expect(artifactContent).toBe("# explore artifact\n\ncontent");
+    expect(artifactContent).toContain("# explore artifact\n\ncontent");
+    expect(artifactContent).toContain("## 文档摘要");
+    expect(artifactContent).toContain("explorer done");
   });
 });
 

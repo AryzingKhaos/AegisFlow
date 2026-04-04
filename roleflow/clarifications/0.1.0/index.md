@@ -21,3 +21,4 @@
 | `default-workflow-role-node-pty-subcommand` | [default-workflow-role-node-pty-subcommand-prd.md](default-workflow-role-node-pty-subcommand-prd.md) | `default-workflow` 的 role 子命令行与 active role 架构需求文档 |
 | `default-workflow-role-child-process-subcommand` | [default-workflow-role-child-process-subcommand-prd.md](default-workflow-role-child-process-subcommand-prd.md) | `default-workflow` 的 role 默认切换到 `child_process`、引入 CLI provider 抽象并补充 clarify 多轮问答工件机制的需求文档 |
 | `default-workflow-role-prompt-bootstrap` | [default-workflow-role-prompt-bootstrap-prd.md](default-workflow-role-prompt-bootstrap-prd.md) | `default-workflow` 的角色原型与项目侧提示词装载需求文档 |
+| `default-workflow-final-artifact-markdown-output` | [default-workflow-final-artifact-markdown-output-prd.md](default-workflow-final-artifact-markdown-output-prd.md) | `default-workflow` 的 phase 最终工件必须输出为可读 Markdown、并与 `RoleResult` 结构化包络解耦的需求文档 |

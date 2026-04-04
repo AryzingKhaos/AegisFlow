@@ -17,6 +17,11 @@ import type {
   WorkflowPhaseConfig,
 } from "../shared/types";
 import { TaskStatus } from "../shared/types";
+import {
+  createGenericArtifactKey,
+  normalizeFinalArtifactMarkdown,
+  resolveFinalArtifactDefinition,
+} from "./final-artifact";
 
 interface WorkflowControllerDependencies {
   taskState: TaskState;
@@ -485,17 +490,24 @@ export class DefaultWorkflowController implements WorkflowController {
     );
 
     if (roleResult.artifactReady !== false) {
+      const finalArtifactDefinition = resolveFinalArtifactDefinition(
+        phaseConfig.name,
+        phaseConfig.hostRole,
+      );
+
       for (const [artifactIndex, artifactContent] of roleResult.artifacts.entries()) {
-      // RoleResult.artifacts 只暴露工件内容字符串；
-      // 真正的命名、分目录和落盘时机仍由 Workflow 统一决定。
+        // RoleResult.artifacts 只暴露工件内容字符串；
+        // 真正的命名、分目录和落盘时机仍由 Workflow 统一决定。
+        const artifactKey = createArtifactKey(
+          phaseConfig.name,
+          phaseConfig.hostRole,
+          artifactIndex,
+        );
+        const isFinalArtifact = artifactKey === finalArtifactDefinition.key;
         const artifactPath = await this.dependencies.artifactManager.saveArtifact(
           this.dependencies.taskState.taskId,
           {
-            key: createArtifactKey(
-              phaseConfig.name,
-              phaseConfig.hostRole,
-              artifactIndex,
-            ),
+            key: artifactKey,
             phase: phaseConfig.name,
             roleName: phaseConfig.hostRole,
             title: createArtifactTitle(
@@ -503,7 +515,16 @@ export class DefaultWorkflowController implements WorkflowController {
               phaseConfig.hostRole,
               artifactIndex,
             ),
-            content: artifactContent,
+            content: isFinalArtifact
+              ? normalizeFinalArtifactMarkdown({
+                  phase: phaseConfig.name,
+                  roleName: phaseConfig.hostRole,
+                  artifactKey,
+                  rawContent: artifactContent,
+                  summary: roleResult.summary,
+                  metadata: roleResult.metadata,
+                })
+              : artifactContent,
           },
         );
 
@@ -516,6 +537,8 @@ export class DefaultWorkflowController implements WorkflowController {
             roleName: phaseConfig.hostRole,
             artifactPath,
             artifactIndex,
+            artifactKey,
+            finalArtifact: isFinalArtifact,
           },
         );
       }
@@ -726,7 +749,14 @@ export class DefaultWorkflowController implements WorkflowController {
       phaseConfig,
       "final-prd",
       "final-prd",
-      prdContent,
+      normalizeFinalArtifactMarkdown({
+        phase: phaseConfig.name,
+        roleName: phaseConfig.hostRole,
+        artifactKey: "final-prd",
+        rawContent: prdContent,
+        summary: prdResult.summary,
+        metadata: prdResult.metadata,
+      }),
     );
   }
 
@@ -839,12 +869,19 @@ export class DefaultWorkflowController implements WorkflowController {
     }
 
     if (previousPhase.name === "clarify") {
-      return allKeys.includes("clarify/final-prd") ? ["clarify/final-prd"] : [];
+      const finalArtifactKey = `clarify/${resolveFinalArtifactDefinition("clarify", previousPhase.hostRole).key}`;
+
+      return allKeys.includes(finalArtifactKey) ? [finalArtifactKey] : [];
     }
 
+    const finalArtifactKey = `${previousPhase.name}/${resolveFinalArtifactDefinition(previousPhase.name, previousPhase.hostRole).key}`;
     const previousPhaseKeys = allKeys
       .filter((key) => key.startsWith(`${previousPhase.name}/`))
       .sort();
+
+    if (previousPhaseKeys.includes(finalArtifactKey)) {
+      return [finalArtifactKey];
+    }
 
     return previousPhaseKeys.length > 0 ? [previousPhaseKeys[0]] : [];
   }
@@ -1148,7 +1185,7 @@ function createArtifactKey(
   roleName: RoleName,
   artifactIndex: number,
 ): string {
-  return `${phase}-${roleName}-${artifactIndex + 1}`;
+  return createGenericArtifactKey(phase, roleName, artifactIndex);
 }
 
 function createArtifactTitle(
