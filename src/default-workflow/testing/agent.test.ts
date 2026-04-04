@@ -342,6 +342,27 @@ describe("IntakeAgent", () => {
     ]);
   });
 
+  it("treats empty workflow confirmation input as yes", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "aegisflow-agent-"));
+    tempDirs.push(root);
+    const projectDir = path.join(root, "project");
+    await mkdir(projectDir, { recursive: true });
+    await writeProjectWorkflowConfig(projectDir);
+    const agent = new IntakeAgent(root);
+
+    await agent.handleUserInput("修复登录报错");
+    const recommendationLines = await agent.handleUserInput(projectDir);
+    const confirmLines = await agent.handleUserInput("");
+
+    expect(recommendationLines).toContain(
+      "是否确认使用该 workflow？请回答 y/n，直接回车等同于 y。",
+    );
+    expect(confirmLines).toContain("已确认 workflow：bugfix-workflow。");
+    expect(confirmLines).toContain(
+      `请提供工件保存目录。直接回车将使用默认目录：${path.resolve(projectDir, ".aegisflow", "artifacts")}`,
+    );
+  });
+
   it("rejects malformed numeric workflow selection input", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "aegisflow-agent-"));
     tempDirs.push(root);
