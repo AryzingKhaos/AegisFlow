@@ -73,7 +73,8 @@ const THEME = {
   panel: "#1c1917",
 };
 
-const MAX_VISIBLE_INTERMEDIATE_LINES = 3;
+const MAX_VISIBLE_INTERMEDIATE_LINES_IDLE = 3;
+const MAX_VISIBLE_INTERMEDIATE_LINES_RUNNING = 7;
 const SPINNER_FRAMES = ["-", "\\", "|", "/"];
 
 export async function runCliApp(): Promise<unknown> {
@@ -376,7 +377,13 @@ function OutputPanel(input: { viewModel: CliViewModel }): unknown {
   const intermediateLabel = isRunning
     ? `${SPINNER_FRAMES[spinnerIndex]} [过程输出]`
     : "[过程输出]";
-  const entries = buildOutputEntries(input.viewModel, intermediateLabel);
+  const entries = buildOutputEntries(
+    input.viewModel,
+    intermediateLabel,
+    isRunning
+      ? MAX_VISIBLE_INTERMEDIATE_LINES_RUNNING
+      : MAX_VISIBLE_INTERMEDIATE_LINES_IDLE,
+  );
 
   return h(ContentSection, {
     title: "输出",
@@ -431,6 +438,7 @@ function LabeledBlock(input: {
 function buildOutputEntries(
   viewModel: CliViewModel,
   intermediateLabel: string,
+  maxVisibleIntermediateLines: number,
 ): unknown[] {
   const orderedBlocks = [
     ...viewModel.finalBlocks.map((block) => ({
@@ -447,10 +455,10 @@ function buildOutputEntries(
   );
   const visibleIntermediateLines = flattenedIntermediateLines.slice(
     0,
-    MAX_VISIBLE_INTERMEDIATE_LINES,
+    maxVisibleIntermediateLines,
   );
   const hasOmittedIntermediateLines =
-    flattenedIntermediateLines.length > MAX_VISIBLE_INTERMEDIATE_LINES;
+    flattenedIntermediateLines.length > maxVisibleIntermediateLines;
 
   return [
     ...orderedBlocks.map(({ kind, block }) =>
