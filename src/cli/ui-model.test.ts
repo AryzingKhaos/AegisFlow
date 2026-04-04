@@ -93,6 +93,38 @@ describe("cli ui model", () => {
     expect(viewModel.finalBlocks[0]?.body).toBe("行一\n行二");
     expect(viewModel.finalBlocks[0]?.tone).toBe("muted");
   });
+
+  it("preserves cross-stream order between skeleton and final blocks", () => {
+    let viewModel = createInitialCliViewModel([]);
+
+    viewModel = applyWorkflowEventToCliViewModel(
+      viewModel,
+      createWorkflowEvent("phase_start", "clarify 开始", {
+        phase: "clarify",
+      }),
+    );
+    viewModel = applyWorkflowEventToCliViewModel(
+      viewModel,
+      createWorkflowEvent("role_output", "最终方案已确认", {
+        outputKind: "summary",
+        phase: "clarify",
+        roleName: "clarifier",
+      }),
+    );
+    viewModel = applyWorkflowEventToCliViewModel(
+      viewModel,
+      createWorkflowEvent("phase_end", "clarify 结束", {
+        phase: "clarify",
+      }),
+    );
+
+    expect(viewModel.skeletonBlocks[0]?.order).toBeLessThan(
+      viewModel.finalBlocks[0]?.order ?? Number.POSITIVE_INFINITY,
+    );
+    expect(viewModel.finalBlocks[0]?.order).toBeLessThan(
+      viewModel.skeletonBlocks[1]?.order ?? Number.POSITIVE_INFINITY,
+    );
+  });
 });
 
 function createWorkflowEvent(

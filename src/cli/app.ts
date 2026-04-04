@@ -432,6 +432,16 @@ function buildOutputEntries(
   viewModel: CliViewModel,
   intermediateLabel: string,
 ): unknown[] {
+  const orderedBlocks = [
+    ...viewModel.finalBlocks.map((block) => ({
+      kind: "final" as const,
+      block,
+    })),
+    ...viewModel.skeletonBlocks.map((block) => ({
+      kind: "skeleton" as const,
+      block,
+    })),
+  ].sort((left, right) => left.block.order - right.block.order);
   const flattenedIntermediateLines = viewModel.intermediateLines.flatMap((line) =>
     normalizeDisplayNewlines(line).split("\n"),
   );
@@ -443,21 +453,19 @@ function buildOutputEntries(
     flattenedIntermediateLines.length > MAX_VISIBLE_INTERMEDIATE_LINES;
 
   return [
-    ...viewModel.finalBlocks.map((block) =>
+    ...orderedBlocks.map(({ kind, block }) =>
       h(LabeledBlock, {
         key: block.id,
-        label: "[结果输出]",
-        color: resolveFinalBlockColor(block.tone),
-        value: block.title ? `${block.title} [${block.body}]` : block.body,
-        bold: block.tone !== "muted",
-      }),
-    ),
-    ...viewModel.skeletonBlocks.map((block) =>
-      h(LabeledBlock, {
-        key: block.id,
-        label: "[骨架输出]",
-        color: THEME.skeleton,
-        value: formatSkeletonBlockValue(block),
+        label: kind === "skeleton" ? "[骨架输出]" : "[结果输出]",
+        color:
+          kind === "skeleton" ? THEME.skeleton : resolveFinalBlockColor(block.tone),
+        value:
+          kind === "skeleton"
+            ? formatSkeletonBlockValue(block)
+            : block.title
+              ? `${block.title} [${block.body}]`
+              : block.body,
+        bold: kind === "skeleton" ? false : block.tone !== "muted",
       }),
     ),
     ...(visibleIntermediateLines.length > 0

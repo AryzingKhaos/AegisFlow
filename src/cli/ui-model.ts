@@ -3,6 +3,7 @@ import type { TaskStatus, WorkflowEvent } from "../default-workflow/shared/types
 
 export interface UiBlock {
   id: string;
+  order: number;
   title: string;
   body: string;
   tone: "accent" | "muted" | "result" | "error";
@@ -14,6 +15,7 @@ export interface CliViewModel {
   currentPhase: string;
   taskStatus: string;
   inputHint: string;
+  nextBlockOrder: number;
   finalBlocks: UiBlock[];
   skeletonBlocks: UiBlock[];
   intermediateLines: string[];
@@ -38,11 +40,13 @@ export function createInitialCliViewModel(
     currentPhase: "-",
     taskStatus: "idle",
     inputHint: buildInputHint("idle"),
+    nextBlockOrder: bootstrapLines.length > 0 ? 1 : 0,
     finalBlocks:
       bootstrapLines.length > 0
         ? [
             {
               id: createUiBlockId("bootstrap"),
+              order: 0,
               title: "启动信息",
               body: bootstrapLines.join("\n"),
               tone: "accent",
@@ -63,16 +67,18 @@ export function appendSystemLines(
     return viewModel;
   }
 
+  const systemBlock = createUiBlock(viewModel, "system", {
+    title,
+    body: lines.join("\n"),
+    tone: "muted",
+  });
+
   return {
     ...viewModel,
+    nextBlockOrder: systemBlock.nextBlockOrder,
     finalBlocks: [
       ...viewModel.finalBlocks,
-      {
-        id: createUiBlockId("system"),
-        title,
-        body: lines.join("\n"),
-        tone: "muted",
-      },
+      systemBlock.block,
     ],
   };
 }
@@ -99,40 +105,51 @@ export function applyWorkflowEventToCliViewModel(
   }
 
   if (event.type === "error") {
+    const errorBlock = createUiBlock(nextViewModel, "error", {
+      title: "执行错误",
+      body: buildErrorBody(event),
+      tone: "error",
+    });
+    const errorSkeletonBlock = createUiBlock(
+      {
+        ...nextViewModel,
+        nextBlockOrder: errorBlock.nextBlockOrder,
+      },
+      "skeleton",
+      {
+        title: "错误事件",
+        body: normalizeCliText(event.message),
+        tone: "muted",
+      },
+    );
+
     return {
       ...nextViewModel,
+      nextBlockOrder: errorSkeletonBlock.nextBlockOrder,
       finalBlocks: [
         ...nextViewModel.finalBlocks,
-        {
-          id: createUiBlockId("error"),
-          title: "执行错误",
-          body: buildErrorBody(event),
-          tone: "error",
-        },
+        errorBlock.block,
       ],
       skeletonBlocks: appendBounded(
         nextViewModel.skeletonBlocks,
-        {
-          id: createUiBlockId("skeleton"),
-          title: "错误事件",
-          body: normalizeCliText(event.message),
-          tone: "muted",
-        },
+        errorSkeletonBlock.block,
         resolvedOptions.maxSkeletonBlocks,
       ),
     };
   }
 
+  const skeletonBlock = createUiBlock(nextViewModel, "skeleton", {
+    title: buildSkeletonTitle(event),
+    body: normalizeCliText(event.message),
+    tone: "muted",
+  });
+
   return {
     ...nextViewModel,
+    nextBlockOrder: skeletonBlock.nextBlockOrder,
     skeletonBlocks: appendBounded(
       nextViewModel.skeletonBlocks,
-      {
-        id: createUiBlockId("skeleton"),
-        title: buildSkeletonTitle(event),
-        body: normalizeCliText(event.message),
-        tone: "muted",
-      },
+      skeletonBlock.block,
       resolvedOptions.maxSkeletonBlocks,
     ),
   };
@@ -159,17 +176,37 @@ function routeRoleOutput(
     };
   }
 
+  const resultBlock = createUiBlock(viewModel, "result", {
+    title: buildResultTitle(event, outputKind),
+    body: event.message,
+    tone: "result",
+  });
+
   return {
     ...viewModel,
+    nextBlockOrder: resultBlock.nextBlockOrder,
     finalBlocks: [
       ...viewModel.finalBlocks,
-      {
-        id: createUiBlockId("result"),
-        title: buildResultTitle(event, outputKind),
-        body: event.message,
-        tone: "result",
-      },
+      resultBlock.block,
     ],
+  };
+}
+
+function createUiBlock(
+  viewModel: CliViewModel,
+  prefix: string,
+  input: Pick<UiBlock, "title" | "body" | "tone">,
+): {
+  block: UiBlock;
+  nextBlockOrder: number;
+} {
+  return {
+    block: {
+      id: createUiBlockId(prefix),
+      order: viewModel.nextBlockOrder,
+      ...input,
+    },
+    nextBlockOrder: viewModel.nextBlockOrder + 1,
   };
 }
 
