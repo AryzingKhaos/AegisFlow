@@ -1,14 +1,23 @@
+import {
+  createIntakeErrorViewFromWorkflowEvent,
+  formatIntakeErrorForCli,
+} from "./error-view";
 import { formatTaskStateSummary } from "../shared/utils";
 import type { WorkflowEvent } from "../shared/types";
+import { normalizeCliText as normalizeCliTextValue } from "./text";
 
 export function formatWorkflowEventForCli(event: WorkflowEvent): string[] {
   if (event.type === "role_output") {
     return formatRoleOutputForCli(event);
   }
 
+  if (event.type === "error") {
+    return formatIntakeErrorForCli(createIntakeErrorViewFromWorkflowEvent(event));
+  }
+
   const lines: string[] = [];
   const title = buildEventTitle(event);
-  const normalizedMessage = normalizeCliText(event.message);
+  const normalizedMessage = normalizeCliTextValue(event.message);
   const taskStateLine = `TaskState 摘要：${formatTaskStateSummary(event.taskState)}`;
 
   if (title) {
@@ -41,11 +50,7 @@ function formatRoleOutputForCli(event: WorkflowEvent): string[] {
 }
 
 export function normalizeCliText(text: string): string {
-  return text
-    .replace(/\r\n/g, "\n")
-    .replace(/\\n/g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
+  return normalizeCliTextValue(text);
 }
 
 function buildEventTitle(event: WorkflowEvent): string {
@@ -67,7 +72,7 @@ function buildEventTitle(event: WorkflowEvent): string {
     case "progress":
       return "*** 进度更新 ***";
     case "error":
-      return "!!! 执行错误 !!!";
+      return "";
     default:
       return `[WorkflowEvent:${event.type}]`;
   }
@@ -86,10 +91,6 @@ function buildMetadataLines(event: WorkflowEvent): string[] {
     case "artifact_created": {
       const artifactPath = event.metadata?.artifactPath;
       return artifactPath ? [`工件路径：${String(artifactPath)}`] : [];
-    }
-    case "error": {
-      const errorMessage = normalizeMetadataText(event.metadata?.error);
-      return errorMessage ? [`错误详情：\n${errorMessage}`] : [];
     }
     default:
       return [];

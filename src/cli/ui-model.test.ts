@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  appendIntakeError,
   appendSystemLines,
   applyWorkflowEventToCliViewModel,
+  clearCliError,
   createInitialCliViewModel,
 } from "./ui-model";
 import { TaskStatus, type WorkflowEvent } from "../default-workflow/shared/types";
@@ -124,6 +126,42 @@ describe("cli ui model", () => {
     expect(viewModel.finalBlocks[0]?.order).toBeLessThan(
       viewModel.skeletonBlocks[1]?.order ?? Number.POSITIVE_INFINITY,
     );
+  });
+
+  it("maps runtime error events into a structured current error view", () => {
+    const viewModel = applyWorkflowEventToCliViewModel(
+      createInitialCliViewModel([]),
+      createWorkflowEvent("error", "阶段执行失败。", {
+        phase: "build",
+        roleName: "builder",
+        error: "artifactReady=false: builder 未产出可落盘工件。",
+      }),
+    );
+
+    expect(viewModel.currentError).toEqual({
+      summary: "阶段执行失败。",
+      reason: "artifactReady=false: builder 未产出可落盘工件。",
+      location: "阶段：build | 角色：builder",
+      nextAction: "检查当前阶段是否按要求产出了可落盘工件，然后重新执行或恢复任务。",
+      source: "workflow",
+    });
+    expect(viewModel.finalBlocks).toEqual([]);
+    expect(viewModel.skeletonBlocks.at(-1)?.title).toBe("错误事件");
+  });
+
+  it("appends and clears intake errors explicitly", () => {
+    const erroredViewModel = appendIntakeError(createInitialCliViewModel([]), {
+      summary: "读取项目 workflow 配置失败。",
+      reason: "项目 workflow 配置非法：workflows 不能为空。",
+      location: "配置文件：/tmp/demo/.aegisflow/aegisproject.yaml",
+      nextAction: "修正 .aegisflow/aegisproject.yaml 中的配置后重新发起任务。",
+      source: "intake",
+    });
+
+    expect(erroredViewModel.currentError?.reason).toBe(
+      "项目 workflow 配置非法：workflows 不能为空。",
+    );
+    expect(clearCliError(erroredViewModel).currentError).toBeUndefined();
   });
 });
 

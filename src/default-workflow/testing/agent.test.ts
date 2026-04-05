@@ -272,6 +272,36 @@ describe("IntakeAgent", () => {
     expect(rendered).toEqual(["\n- 第一步\n\n```ts\nconst answer = 42;\n```\n"]);
   });
 
+  it("formats workflow error events with reason, location and next action", () => {
+    const rendered = formatWorkflowEventForCli({
+      type: "error",
+      taskId: "task_demo",
+      message: "阶段执行失败。",
+      timestamp: Date.now(),
+      taskState: {
+        taskId: "task_demo",
+        title: "demo",
+        currentPhase: "build",
+        phaseStatus: "failed",
+        status: TaskStatus.FAILED,
+        updatedAt: Date.now(),
+      },
+      metadata: {
+        phase: "build",
+        roleName: "builder",
+        error: "artifactReady=false: builder 未产出可落盘工件。",
+      },
+    } satisfies WorkflowEvent).join("\n");
+
+    expect(rendered).toContain("!!! 执行错误 !!!");
+    expect(rendered).toContain("失败摘要：阶段执行失败。");
+    expect(rendered).toContain("失败原因：\nartifactReady=false: builder 未产出可落盘工件。");
+    expect(rendered).toContain("失败位置：阶段：build | 角色：builder");
+    expect(rendered).toContain(
+      "下一步建议：\n检查当前阶段是否按要求产出了可落盘工件，然后重新执行或恢复任务。",
+    );
+  });
+
   it("recommends workflow from project config before runtime initialization", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "aegisflow-agent-"));
     tempDirs.push(root);
@@ -379,9 +409,15 @@ describe("IntakeAgent", () => {
     await agent.handleUserInput("修复登录报错");
     const lines = await agent.handleUserInput(projectDir);
 
-    expect(lines).toEqual([
-      `项目 workflow 配置非法：当前仍使用旧的 workflow 单对象结构；本期必须改为 workflows 非空列表。 请修正 ${path.join(projectDir, ".aegisflow", "aegisproject.yaml")} 中的 workflows 配置。`,
-    ]);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("!!! 执行错误 !!!");
+    expect(lines[0]).toContain("失败摘要：读取项目 workflow 配置失败。");
+    expect(lines[0]).toContain(
+      `失败原因：\n项目 workflow 配置非法：当前仍使用旧的 workflow 单对象结构；本期必须改为 workflows 非空列表。 请修正 ${path.join(projectDir, ".aegisflow", "aegisproject.yaml")} 中的 workflows 配置。`,
+    );
+    expect(lines[0]).toContain(
+      `失败位置：配置文件：${path.join(projectDir, ".aegisflow", "aegisproject.yaml")}`,
+    );
   });
 
   it("blocks startup when workflow names are duplicated", async () => {
@@ -410,9 +446,14 @@ describe("IntakeAgent", () => {
     await agent.handleUserInput("调整列表排序规则");
     const lines = await agent.handleUserInput(projectDir);
 
-    expect(lines).toEqual([
-      `项目 workflow 配置非法：workflows[1].name 重复：duplicate-workflow。 请修正 ${path.join(projectDir, ".aegisflow", "aegisproject.yaml")} 中的 workflows 配置。`,
-    ]);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("失败摘要：读取项目 workflow 配置失败。");
+    expect(lines[0]).toContain(
+      `失败原因：\n项目 workflow 配置非法：workflows[1].name 重复：duplicate-workflow。 请修正 ${path.join(projectDir, ".aegisflow", "aegisproject.yaml")} 中的 workflows 配置。`,
+    );
+    expect(lines[0]).toContain(
+      `失败位置：配置文件：${path.join(projectDir, ".aegisflow", "aegisproject.yaml")}`,
+    );
   });
 
   it("blocks startup when a workflow contains duplicated phase names", async () => {
@@ -438,9 +479,56 @@ describe("IntakeAgent", () => {
     await agent.handleUserInput("新增一个构建步骤");
     const lines = await agent.handleUserInput(projectDir);
 
-    expect(lines).toEqual([
-      `项目 workflow 配置非法：workflow duplicate-phase-workflow 的 phases[1].name 重复：build。 请修正 ${path.join(projectDir, ".aegisflow", "aegisproject.yaml")} 中的 workflows 配置。`,
-    ]);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("失败摘要：读取项目 workflow 配置失败。");
+    expect(lines[0]).toContain(
+      `失败原因：\n项目 workflow 配置非法：workflow duplicate-phase-workflow 的 phases[1].name 重复：build。 请修正 ${path.join(projectDir, ".aegisflow", "aegisproject.yaml")} 中的 workflows 配置。`,
+    );
+    expect(lines[0]).toContain(
+      `失败位置：配置文件：${path.join(projectDir, ".aegisflow", "aegisproject.yaml")}`,
+    );
+  });
+
+  it("emits structured preflight errors through onIntakeError without duplicating fallback lines", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "aegisflow-agent-"));
+    tempDirs.push(root);
+    const projectDir = path.join(root, "project");
+    await mkdir(path.join(projectDir, ".aegisflow"), { recursive: true });
+    await writeFile(
+      path.join(projectDir, ".aegisflow", "aegisproject.yaml"),
+      [
+        "workflow:",
+        '  type: "default-workflow"',
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const receivedErrors: Array<{
+      summary: string;
+      reason: string;
+      location?: string;
+      nextAction?: string;
+      source: string;
+    }> = [];
+    const agent = new IntakeAgent(root, {
+      onIntakeError(error) {
+        receivedErrors.push(error);
+      },
+    });
+
+    await agent.handleUserInput("修复登录报错");
+    const lines = await agent.handleUserInput(projectDir);
+
+    expect(lines).toEqual([]);
+    expect(receivedErrors).toHaveLength(1);
+    expect(receivedErrors[0]).toMatchObject({
+      summary: "读取项目 workflow 配置失败。",
+      location: `配置文件：${path.join(projectDir, ".aegisflow", "aegisproject.yaml")}`,
+      source: "intake",
+    });
+    expect(receivedErrors[0]?.reason).toContain("项目 workflow 配置非法");
+    expect(receivedErrors[0]?.nextAction).toContain(".aegisflow/aegisproject.yaml");
   });
 
   it("prefers the workflow whose description text matches more closely within the same task type", async () => {

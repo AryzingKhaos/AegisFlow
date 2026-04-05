@@ -1044,6 +1044,7 @@ export class DefaultWorkflowController implements WorkflowController {
     await this.pushEvent(workflowEvents, "error", message, {
       error: error instanceof Error ? error.message : String(error),
       phase: this.dependencies.taskState.currentPhase,
+      roleName: currentPhaseConfig?.hostRole,
       status: TaskStatus.FAILED,
     });
     await this.pushEvent(workflowEvents, "task_end", "任务执行失败。", {

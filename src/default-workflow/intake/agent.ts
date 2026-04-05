@@ -37,6 +37,11 @@ import {
 } from "./intent";
 import { initializeIntakeModel } from "./model";
 import { formatWorkflowEventForCli } from "./output";
+import {
+  createIntakeErrorViewFromUnknown,
+  formatIntakeErrorForCli,
+  type IntakeErrorView,
+} from "./error-view";
 
 type PendingStep =
   | "confirm_workflow"
@@ -61,6 +66,7 @@ interface ResumeIndexSnapshot {
 }
 
 interface IntakeAgentOptions {
+  onIntakeError?: (error: IntakeErrorView) => void;
   onWorkflowOutput?: (lines: string[]) => void;
   onWorkflowEvent?: (event: WorkflowEvent) => void;
 }
@@ -90,46 +96,57 @@ export class IntakeAgent {
   public async handleUserInput(rawInput: string): Promise<string[]> {
     const input = rawInput.trim();
 
-    if (!input && this.pendingStep !== "collect_project_dir" && this.pendingStep !== "collect_artifact_dir") {
-      return ["请输入需求或任务控制指令。"];
-    }
-
-    if (this.pendingStep && input) {
-      // 控制指令必须优先于资料收集处理，这样用户在追问阶段也能取消
-      // 或恢复任务，而不会被误判成普通资料输入。
-      const pendingControlLines = await this.handlePendingStepControlIntent(input);
-
-      if (pendingControlLines) {
-        return pendingControlLines;
+    try {
+      if (
+        !input &&
+        this.pendingStep !== "collect_project_dir" &&
+        this.pendingStep !== "collect_artifact_dir"
+      ) {
+        return ["请输入需求或任务控制指令。"];
       }
+
+      if (this.pendingStep && input) {
+        // 控制指令必须优先于资料收集处理，这样用户在追问阶段也能取消
+        // 或恢复任务，而不会被误判成普通资料输入。
+        const pendingControlLines = await this.handlePendingStepControlIntent(input);
+
+        if (pendingControlLines) {
+          return pendingControlLines;
+        }
+      }
+
+      if (this.pendingStep) {
+        return this.handlePendingStep(input);
+      }
+
+      // 当 Intake 不再处于追问阶段后，所有输入都先经过统一意图归一化，
+      // 然后才决定是否触达 Runtime。
+      const hasActiveTask = this.hasActiveTask();
+      const intent = normalizeUserIntent(input, hasActiveTask);
+
+      if (intent.type === "out_of_scope") {
+        return [OUT_OF_SCOPE_REPLY];
+      }
+
+      if (intent.type === "resume_task") {
+        return this.resumeTask(intent.normalizedMessage);
+      }
+
+      if (intent.type === "cancel_task") {
+        return this.cancelTask(intent.normalizedMessage);
+      }
+
+      if (intent.type === "participate" && this.runtime) {
+        return this.dispatchRuntimeEvent("participate", intent.normalizedMessage);
+      }
+
+      return this.startDraftTask(intent.normalizedMessage);
+    } catch (error) {
+      return this.emitUnknownIntakeError(error, {
+        summary: "Intake 处理失败。",
+        source: "intake",
+      });
     }
-
-    if (this.pendingStep) {
-      return this.handlePendingStep(input);
-    }
-
-    // 当 Intake 不再处于追问阶段后，所有输入都先经过统一意图归一化，
-    // 然后才决定是否触达 Runtime。
-    const hasActiveTask = this.hasActiveTask();
-    const intent = normalizeUserIntent(input, hasActiveTask);
-
-    if (intent.type === "out_of_scope") {
-      return [OUT_OF_SCOPE_REPLY];
-    }
-
-    if (intent.type === "resume_task") {
-      return this.resumeTask(intent.normalizedMessage);
-    }
-
-    if (intent.type === "cancel_task") {
-      return this.cancelTask(intent.normalizedMessage);
-    }
-
-    if (intent.type === "participate" && this.runtime) {
-      return this.dispatchRuntimeEvent("participate", intent.normalizedMessage);
-    }
-
-    return this.startDraftTask(intent.normalizedMessage);
   }
 
   public async handleInterruptSignal(): Promise<{
@@ -261,7 +278,14 @@ export class IntakeAgent {
     const projectStats = await fs.stat(projectDir).catch(() => null);
 
     if (!projectStats || !projectStats.isDirectory()) {
-      return [`目标项目目录不存在或不可访问：${projectDir}`];
+      return this.emitUnknownIntakeError(
+        new Error(`目标项目目录不存在或不可访问：${projectDir}`),
+        {
+          summary: "目标项目目录无效。",
+          location: `路径：${projectDir}`,
+          source: "intake",
+        },
+      );
     }
 
     try {
@@ -286,7 +310,10 @@ export class IntakeAgent {
         "是否确认使用该 workflow？请回答 y/n。",
       ];
     } catch (error) {
-      return [getErrorMessage(error)];
+      return this.emitUnknownIntakeError(error, {
+        summary: "读取项目 workflow 配置失败。",
+        source: "intake",
+      });
     }
   }
 
@@ -297,7 +324,15 @@ export class IntakeAgent {
 
     // 工件目录在启动前就创建出来，避免 Workflow 运行到一半才暴露路径问题。
     const artifactDir = resolveArtifactDir(this.draft.projectDir, normalizeArtifactInput(input));
-    await fs.mkdir(artifactDir, { recursive: true });
+    try {
+      await fs.mkdir(artifactDir, { recursive: true });
+    } catch (error) {
+      return this.emitUnknownIntakeError(error, {
+        summary: "工件目录初始化失败。",
+        location: `路径：${artifactDir}`,
+        source: "intake",
+      });
+    }
     this.draft.artifactDir = artifactDir;
     this.pendingStep = undefined;
 
@@ -315,15 +350,25 @@ export class IntakeAgent {
     }
 
     // 只有 Intake 收齐最小初始化资料后，才允许真正创建 Runtime。
-    const buildResult = await buildRuntimeForNewTask({
-      projectDir: this.draft.projectDir,
-      artifactDir: this.draft.artifactDir,
-      workflow: this.draft.workflow,
-      workflowPhases: this.draft.selectedWorkflow.phases,
-      workflowProfileId: this.draft.selectedWorkflow.name,
-      workflowProfileLabel: this.draft.selectedWorkflow.name,
-      description: this.draft.description,
-    });
+    let buildResult: Awaited<ReturnType<typeof buildRuntimeForNewTask>>;
+
+    try {
+      buildResult = await buildRuntimeForNewTask({
+        projectDir: this.draft.projectDir,
+        artifactDir: this.draft.artifactDir,
+        workflow: this.draft.workflow,
+        workflowPhases: this.draft.selectedWorkflow.phases,
+        workflowProfileId: this.draft.selectedWorkflow.name,
+        workflowProfileLabel: this.draft.selectedWorkflow.name,
+        description: this.draft.description,
+      });
+    } catch (error) {
+      return this.emitUnknownIntakeError(error, {
+        summary: "Runtime 初始化失败。",
+        location: `路径：${this.draft.projectDir}`,
+        source: "intake",
+      });
+    }
 
     this.attachRuntime(buildResult.runtime, buildResult.persistedContext);
     // 在工件目录之外额外保存最近可恢复任务索引，确保后续 CLI 会话
@@ -383,10 +428,20 @@ export class IntakeAgent {
       return ["未找到可恢复的未完成任务。"];
     }
 
-    const buildResult = await buildRuntimeForResume({
-      projectConfig: persistedContext.projectConfig,
-      persistedContext,
-    });
+    let buildResult: Awaited<ReturnType<typeof buildRuntimeForResume>>;
+
+    try {
+      buildResult = await buildRuntimeForResume({
+        projectConfig: persistedContext.projectConfig,
+        persistedContext,
+      });
+    } catch (error) {
+      return this.emitUnknownIntakeError(error, {
+        summary: "恢复任务失败。",
+        location: `任务：${persistedContext.taskId}`,
+        source: "intake",
+      });
+    }
 
     this.attachRuntime(buildResult.runtime, buildResult.persistedContext);
     await this.saveResumeIndex(buildResult.persistedContext);
@@ -506,6 +561,28 @@ export class IntakeAgent {
     this.draft = undefined;
     this.pendingStep = undefined;
     return [message];
+  }
+
+  private emitUnknownIntakeError(
+    error: unknown,
+    input: {
+      summary: string;
+      location?: string;
+      nextAction?: string;
+      source?: IntakeErrorView["source"];
+    },
+  ): string[] {
+    return this.emitIntakeError(createIntakeErrorViewFromUnknown(error, input));
+  }
+
+  private emitIntakeError(error: IntakeErrorView): string[] {
+    this.options.onIntakeError?.(error);
+
+    if (this.options.onIntakeError) {
+      return [];
+    }
+
+    return formatIntakeErrorForCli(error);
   }
 
   private async handlePendingStepControlIntent(
@@ -803,12 +880,4 @@ function countSharedTerms(left: Set<string>, right: Set<string>): number {
   }
 
   return count;
-}
-
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return "发生未知错误，请检查项目配置后重试。";
 }

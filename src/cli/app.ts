@@ -1,10 +1,13 @@
 declare const require: (id: string) => unknown;
 
 import { IntakeAgent } from "../default-workflow";
+import { createIntakeErrorViewFromUnknown } from "../default-workflow/intake/error-view";
 import type { WorkflowEvent } from "../default-workflow/shared/types";
 import {
+  appendIntakeError,
   appendSystemLines,
   applyWorkflowEventToCliViewModel,
+  clearCliError,
   createInitialCliViewModel,
   type CliViewModel,
   type UiBlock,
@@ -105,6 +108,9 @@ function IntakeInkApp(): unknown {
 
   if (!agentRef.current) {
     agentRef.current = new IntakeAgent(process.cwd(), {
+      onIntakeError(error) {
+        setViewModel((previous) => appendIntakeError(previous, error));
+      },
       onWorkflowOutput() {
         return;
       },
@@ -148,6 +154,7 @@ function IntakeInkApp(): unknown {
     if (key.return) {
       const submittedInput = input;
       setInput("");
+      setViewModel((previous) => clearCliError(previous));
 
       if (agent.shouldHandleInputAsLiveParticipation(submittedInput)) {
         enqueueLiveInput(async () => {
@@ -183,6 +190,11 @@ function IntakeInkApp(): unknown {
       viewModel,
       isBusy,
     }),
+    viewModel.currentError
+      ? h(ErrorPanel, {
+          error: viewModel.currentError,
+        })
+      : null,
     h(
       Box,
       {
@@ -207,13 +219,15 @@ function IntakeInkApp(): unknown {
         await work();
       })
       .catch((error) => {
-        pushSystemLines(
-          [
-            `CLI 处理失败：${
-              error instanceof Error ? error.message : String(error)
-            }`,
-          ],
-          "执行错误",
+        setViewModel((previous) =>
+          appendIntakeError(
+            previous,
+            createIntakeErrorViewFromUnknown(error, {
+              summary: "CLI 处理失败。",
+              location: "入口：Intake CLI",
+              source: "cli",
+            }),
+          ),
         );
       })
       .finally(() => {
@@ -225,13 +239,15 @@ function IntakeInkApp(): unknown {
     pendingLiveInputRef.current = pendingLiveInputRef.current
       .then(work)
       .catch((error) => {
-        pushSystemLines(
-          [
-            `CLI 实时透传失败：${
-              error instanceof Error ? error.message : String(error)
-            }`,
-          ],
-          "执行错误",
+        setViewModel((previous) =>
+          appendIntakeError(
+            previous,
+            createIntakeErrorViewFromUnknown(error, {
+              summary: "CLI 实时透传失败。",
+              location: "入口：Intake CLI",
+              source: "cli",
+            }),
+          ),
         );
       });
   }
@@ -353,6 +369,58 @@ function ContentSection(input: {
       ...input.children,
     ),
   );
+}
+
+function ErrorPanel(input: {
+  error: NonNullable<CliViewModel["currentError"]>;
+}): unknown {
+  const children = [
+    h(
+      Text,
+      {
+        key: "error-summary",
+        color: THEME.text,
+        bold: true,
+      },
+      input.error.summary,
+    ),
+    h(LabeledBlock, {
+      key: "error-reason",
+      label: "[失败原因]",
+      value: input.error.reason,
+      color: THEME.error,
+      bold: true,
+    }),
+  ];
+
+  if (input.error.location) {
+    children.push(
+      h(LabeledBlock, {
+        key: "error-location",
+        label: "[失败位置]",
+        value: input.error.location,
+        color: THEME.result,
+      }),
+    );
+  }
+
+  if (input.error.nextAction) {
+    children.push(
+      h(LabeledBlock, {
+        key: "error-next-action",
+        label: "[下一步建议]",
+        value: input.error.nextAction,
+        color: THEME.accentSoft,
+      }),
+    );
+  }
+
+  return h(ContentSection, {
+    title: "错误说明",
+    borderColor: THEME.error,
+    marginTop: 1,
+    children,
+  });
 }
 
 function OutputPanel(input: { viewModel: CliViewModel }): unknown {

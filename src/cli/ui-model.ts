@@ -1,4 +1,8 @@
-import { normalizeCliText } from "../default-workflow/intake/output";
+import {
+  createIntakeErrorViewFromWorkflowEvent,
+  type IntakeErrorView,
+} from "../default-workflow/intake/error-view";
+import { normalizeCliText } from "../default-workflow/intake/text";
 import type { TaskStatus, WorkflowEvent } from "../default-workflow/shared/types";
 
 export interface UiBlock {
@@ -15,6 +19,7 @@ export interface CliViewModel {
   currentPhase: string;
   taskStatus: string;
   inputHint: string;
+  currentError?: IntakeErrorView;
   nextBlockOrder: number;
   finalBlocks: UiBlock[];
   skeletonBlocks: UiBlock[];
@@ -40,6 +45,7 @@ export function createInitialCliViewModel(
     currentPhase: "-",
     taskStatus: "idle",
     inputHint: buildInputHint("idle"),
+    currentError: undefined,
     nextBlockOrder: bootstrapLines.length > 0 ? 1 : 0,
     finalBlocks:
       bootstrapLines.length > 0
@@ -83,6 +89,27 @@ export function appendSystemLines(
   };
 }
 
+export function appendIntakeError(
+  viewModel: CliViewModel,
+  error: IntakeErrorView,
+): CliViewModel {
+  return {
+    ...viewModel,
+    currentError: error,
+  };
+}
+
+export function clearCliError(viewModel: CliViewModel): CliViewModel {
+  if (!viewModel.currentError) {
+    return viewModel;
+  }
+
+  return {
+    ...viewModel,
+    currentError: undefined,
+  };
+}
+
 export function applyWorkflowEventToCliViewModel(
   viewModel: CliViewModel,
   event: WorkflowEvent,
@@ -98,6 +125,10 @@ export function applyWorkflowEventToCliViewModel(
     currentPhase: event.taskState.currentPhase,
     taskStatus: event.taskState.status,
     inputHint: buildInputHint(event.taskState.status),
+    currentError:
+      event.type !== "error" && event.taskState.status !== "failed"
+        ? undefined
+        : viewModel.currentError,
   };
 
   if (event.type === "role_output") {
@@ -105,31 +136,16 @@ export function applyWorkflowEventToCliViewModel(
   }
 
   if (event.type === "error") {
-    const errorBlock = createUiBlock(nextViewModel, "error", {
-      title: "执行错误",
-      body: buildErrorBody(event),
-      tone: "error",
+    const errorSkeletonBlock = createUiBlock(nextViewModel, "skeleton", {
+      title: "错误事件",
+      body: normalizeCliText(event.message),
+      tone: "muted",
     });
-    const errorSkeletonBlock = createUiBlock(
-      {
-        ...nextViewModel,
-        nextBlockOrder: errorBlock.nextBlockOrder,
-      },
-      "skeleton",
-      {
-        title: "错误事件",
-        body: normalizeCliText(event.message),
-        tone: "muted",
-      },
-    );
 
     return {
       ...nextViewModel,
+      currentError: createIntakeErrorViewFromWorkflowEvent(event),
       nextBlockOrder: errorSkeletonBlock.nextBlockOrder,
-      finalBlocks: [
-        ...nextViewModel.finalBlocks,
-        errorBlock.block,
-      ],
       skeletonBlocks: appendBounded(
         nextViewModel.skeletonBlocks,
         errorSkeletonBlock.block,
@@ -250,19 +266,6 @@ function buildResultTitle(event: WorkflowEvent, outputKind: string): string {
       : event.taskState.currentPhase;
 
   return `${roleName} @ ${phase} · ${outputKind}`;
-}
-
-function buildErrorBody(event: WorkflowEvent): string {
-  const errorDetail =
-    typeof event.metadata?.error === "string"
-      ? normalizeCliText(event.metadata.error)
-      : "";
-
-  if (!errorDetail) {
-    return normalizeCliText(event.message);
-  }
-
-  return [normalizeCliText(event.message), "", errorDetail].join("\n");
 }
 
 function buildInputHint(status: TaskStatus | string): string {
