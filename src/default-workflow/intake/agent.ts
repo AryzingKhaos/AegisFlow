@@ -95,10 +95,10 @@ export class IntakeAgent {
 
   public async handleUserInput(rawInput: string): Promise<string[]> {
     const input = rawInput.trim();
-
     try {
       if (
         !input &&
+        this.pendingStep !== "confirm_workflow" &&
         this.pendingStep !== "collect_project_dir" &&
         this.pendingStep !== "collect_artifact_dir"
       ) {
@@ -215,6 +215,10 @@ export class IntakeAgent {
   private async handlePendingStep(input: string): Promise<string[]> {
     switch (this.pendingStep) {
       case "confirm_workflow":
+        if (!input) {
+          return this.confirmRecommendedWorkflow();
+        }
+
         if (isTruthyAnswer(input)) {
           return this.confirmRecommendedWorkflow();
         }
@@ -224,7 +228,7 @@ export class IntakeAgent {
           return this.buildWorkflowSelectionPrompt();
         }
 
-        return ["请回答 y/n，或输入 是/否。"];
+        return ["请回答 y/n，或输入 是/否。直接回车等同于 y。"];
       case "select_workflow":
         return this.selectWorkflowFromUserInput(input);
       case "collect_project_dir":
@@ -307,7 +311,7 @@ export class IntakeAgent {
         `推荐理由：${recommendation.reason}`,
         `workflow 描述：${recommendation.workflow.description}`,
         `流程编排：${formatWorkflowPhases(recommendation.workflow.phases)}`,
-        "是否确认使用该 workflow？请回答 y/n。",
+        "是否确认使用该 workflow？请回答 y/n，直接回车等同于 y。",
       ];
     } catch (error) {
       return this.emitUnknownIntakeError(error, {

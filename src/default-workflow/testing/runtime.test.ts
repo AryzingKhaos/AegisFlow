@@ -744,9 +744,11 @@ describe("workflow runtime", () => {
         }),
         explorer: createRole("explorer", async (_input, context) => {
           expect(await context.artifacts.list()).toEqual(["clarify/final-prd"]);
-          expect(await context.artifacts.get("clarify/final-prd")).toBe(
-            "# final prd\n\ncontent",
-          );
+          const visiblePrd = await context.artifacts.get("clarify/final-prd");
+
+          expect(visiblePrd).toContain("# final prd");
+          expect(visiblePrd).toContain("## 文档摘要");
+          expect(visiblePrd).toContain("clarifier:final-prd");
           expect(await context.artifacts.get("clarify/initial-requirement")).toBeUndefined();
           expect(await context.artifacts.get("clarify/clarify-dialogue")).toBeUndefined();
 
@@ -761,6 +763,233 @@ describe("workflow runtime", () => {
     await controller.run(taskState.taskId, "补齐 API 细节");
 
     expect(taskState.status).toBe(TaskStatus.COMPLETED);
+  });
+
+  it("normalizes clarify final-prd before saving and exposing it to the next phase", async () => {
+    const root = await createTempProject();
+    const projectDir = path.join(root, "project");
+    const artifactDir = path.join(root, "artifacts");
+    await mkdir(projectDir, { recursive: true });
+
+    const workflowPhases: WorkflowPhaseConfig[] = [
+      {
+        name: "clarify",
+        hostRole: "clarifier",
+        needApproval: false,
+      },
+      {
+        name: "explore",
+        hostRole: "explorer",
+        needApproval: false,
+      },
+    ];
+    const projectConfig = createProjectConfig({
+      projectDir,
+      artifactDir,
+      workflow: createWorkflowSelection("feature_change"),
+      workflowPhases,
+    });
+    const artifactManager = new FileArtifactManager(projectConfig);
+    const taskState = createInitialTaskState(
+      "task_clarify_final_markdown_case",
+      "clarify_final_markdown_case",
+      workflowPhases,
+    );
+    await artifactManager.initializeTask(taskState.taskId);
+    await artifactManager.saveTaskContext({
+      taskId: taskState.taskId,
+      title: taskState.title,
+      description: "生成 PRD",
+      createdAt: Date.now(),
+      lastRuntimeId: "runtime_clarify_final_markdown_case",
+      projectConfig,
+    });
+
+    const controller = new DefaultWorkflowController({
+      taskState,
+      projectConfig,
+      eventEmitter: new EventEmitter(),
+      eventLogger: new MemoryEventLogger(),
+      artifactManager,
+      roleRegistry: new TestRoleRegistry({
+        clarifier: createRole("clarifier", async (input) => {
+          if (input.includes("正式生成 PRD")) {
+            return {
+              summary: "PRD 已生成",
+              artifacts: [
+                JSON.stringify({
+                  summary: "这是最终 PRD 摘要",
+                  artifacts: [
+                    "# Final PRD\n\n## Goal\n\n让最终工件直接可读。",
+                  ],
+                  metadata: {
+                    notes: ["保留关键补充说明"],
+                  },
+                }),
+              ],
+              metadata: {
+                decision: "final_prd_generated",
+              },
+            };
+          }
+
+          return {
+            summary: "clarifier ready-for-prd",
+            artifacts: [],
+            metadata: {
+              decision: "ready_for_prd",
+            },
+          };
+        }),
+        explorer: createRole("explorer", async (_input, context) => {
+          const visiblePrd = await context.artifacts.get("clarify/final-prd");
+
+          expect(visiblePrd).toContain("# Final PRD");
+          expect(visiblePrd).toContain("## Goal");
+          expect(visiblePrd).toContain("## 文档摘要");
+          expect(visiblePrd).toContain("PRD 已生成");
+          expect(visiblePrd).toContain("## 补充说明");
+          expect(visiblePrd).toContain("保留关键补充说明");
+          expect(visiblePrd).not.toContain('"artifacts"');
+
+          return {
+            summary: "explorer done",
+            artifacts: ["# explore artifact\n\ncontent"],
+          };
+        }),
+      }),
+    });
+
+    await controller.run(taskState.taskId, "生成 PRD");
+
+    const savedPrd = await readFile(
+      path.join(
+        artifactDir,
+        "tasks",
+        taskState.taskId,
+        "artifacts",
+        "clarify",
+        "final-prd.md",
+      ),
+      "utf8",
+    );
+
+    expect(savedPrd).toContain("# Final PRD");
+    expect(savedPrd).toContain("## 文档摘要");
+    expect(savedPrd).not.toContain('"summary"');
+    expect(savedPrd).not.toContain('"artifacts"');
+  });
+
+  it("normalizes the generic phase final artifact and keeps it visible to the next phase", async () => {
+    const root = await createTempProject();
+    const projectDir = path.join(root, "project");
+    const artifactDir = path.join(root, "artifacts");
+    await mkdir(projectDir, { recursive: true });
+
+    const workflowPhases: WorkflowPhaseConfig[] = [
+      {
+        name: "plan",
+        hostRole: "planner",
+        needApproval: false,
+      },
+      {
+        name: "build",
+        hostRole: "builder",
+        needApproval: false,
+      },
+    ];
+    const projectConfig = createProjectConfig({
+      projectDir,
+      artifactDir,
+      workflow: createWorkflowSelection("feature_change"),
+      workflowPhases,
+    });
+    const artifactManager = new FileArtifactManager(projectConfig);
+    const taskState = createInitialTaskState(
+      "task_plan_final_markdown_case",
+      "plan_final_markdown_case",
+      workflowPhases,
+    );
+    await artifactManager.initializeTask(taskState.taskId);
+    await artifactManager.saveTaskContext({
+      taskId: taskState.taskId,
+      title: taskState.title,
+      description: "输出计划工件",
+      createdAt: Date.now(),
+      lastRuntimeId: "runtime_plan_final_markdown_case",
+      projectConfig,
+    });
+
+    const controller = new DefaultWorkflowController({
+      taskState,
+      projectConfig,
+      eventEmitter: new EventEmitter(),
+      eventLogger: new MemoryEventLogger(),
+      artifactManager,
+      roleRegistry: new TestRoleRegistry({
+        planner: createRole("planner", async () => ({
+          summary: "当前不建议继续推进。",
+          artifacts: [
+            JSON.stringify({
+              planTitle: "Implementation Plan",
+              steps: ["确认接口", "补测试", "落代码"],
+            }),
+            "# secondary artifact\n\nraw",
+          ],
+          metadata: {
+            blockingQuestions: ["缺少接口返回字段定义"],
+            notes: ["等待后端确认 schema"],
+            recommendation: "当前不建议继续推进。",
+          },
+        })),
+        builder: createRole("builder", async (_input, context) => {
+          expect(await context.artifacts.list()).toEqual(["plan/plan-planner-1"]);
+
+          const planArtifact = await context.artifacts.get("plan/plan-planner-1");
+
+          expect(planArtifact).toContain("## Plan Title");
+          expect(planArtifact).toContain("Implementation Plan");
+          expect(planArtifact).toContain("## Blocking Questions");
+          expect(planArtifact).toContain("缺少接口返回字段定义");
+          expect(planArtifact).toContain("## 结论");
+          expect(planArtifact).toContain("当前不建议继续推进。");
+          expect(planArtifact).not.toContain('"planTitle"');
+          expect(await context.artifacts.get("plan/plan-planner-2")).toBeUndefined();
+
+          return {
+            summary: "builder done",
+            artifacts: ["# build artifact\n\ncontent"],
+          };
+        }),
+      }),
+    });
+
+    const events = await controller.run(taskState.taskId, "输出计划工件");
+    const savedPlan = await readFile(
+      path.join(
+        artifactDir,
+        "tasks",
+        taskState.taskId,
+        "artifacts",
+        "plan",
+        "plan-planner-1.md",
+      ),
+      "utf8",
+    );
+
+    expect(savedPlan).toContain("## Plan Title");
+    expect(savedPlan).toContain("## Blocking Questions");
+    expect(savedPlan).toContain("## 补充说明");
+    expect(savedPlan).toContain("## 结论");
+    expect(savedPlan).not.toContain('"steps"');
+    expect(
+      events.some(
+        (event) =>
+          event.type === "artifact_created" &&
+          event.metadata?.artifactKey === "plan-planner-1" &&
+          event.metadata?.finalArtifact === true,
+      ),
+    ).toBe(true);
   });
 
   it("fails clarify when metadata.decision is missing or invalid", async () => {
