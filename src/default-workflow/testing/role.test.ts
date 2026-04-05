@@ -5,7 +5,11 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { FileArtifactManager } from "../persistence/task-store";
 import { resolveRoleCodexConfig } from "../role/config";
-import { CodexCliRoleAgentExecutor } from "../role/executor";
+import {
+  ChildProcessCliTransport,
+  CodexCliRoleAgentExecutor,
+  DefaultRoleAgentExecutor,
+} from "../role/executor";
 import { buildRolePrompt } from "../role/prompts";
 import { executeRoleAgent, type RoleAgentBootstrap } from "../role/model";
 import {
@@ -931,6 +935,206 @@ describe("role layer", () => {
     ).rejects.toThrow("Role agent execution failed: codex exited with code 1");
   });
 
+  it("emits executor raw stdout, stderr, exit and result payload into debug events", async () => {
+    const root = await createTempProject();
+    const projectDir = path.join(root, "project");
+    await mkdir(projectDir, { recursive: true });
+
+    const observedDebugEvents: Array<{
+      type: string;
+      message?: string;
+      payload?: unknown;
+      metadata?: Record<string, unknown>;
+    }> = [];
+    const executor = new DefaultRoleAgentExecutor({
+      transport: {
+        transportKind: "test_transport",
+        async execute(request) {
+          await request.onStdoutLine?.("raw stdout line");
+          await request.onStderrChunk?.("raw stderr line");
+          await request.onExit?.({
+            code: 0,
+            signal: null,
+            timedOut: false,
+            stderr: "raw stderr line",
+          });
+        },
+      },
+      provider: {
+        providerKind: "test_provider",
+        async prepareExecution() {
+          return {
+            command: "fake-codex",
+            args: ["exec"],
+            cwd: projectDir,
+            stdin: "",
+            env: {},
+            timeoutMs: 1000,
+            readResult: async () => '{"summary":"done","artifacts":[]}',
+          };
+        },
+      },
+    });
+
+    await executor.execute({
+      roleName: "builder",
+      prompt: "PROMPT",
+      context: {
+        taskId: "task_executor_debug_case",
+        phase: "build",
+        cwd: projectDir,
+        projectConfig: createProjectConfig({
+          projectDir,
+          artifactDir: path.join(root, "artifacts"),
+          workflow: createWorkflowSelection("bugfix"),
+        }),
+        roleCapabilityProfile: createCapabilityProfile("builder"),
+        async emitDebugEvent(event) {
+          observedDebugEvents.push(event);
+        },
+        artifacts: {
+          async get() {
+            return undefined;
+          },
+          async list() {
+            return [];
+          },
+        },
+      },
+      executionProfile: createCapabilityProfile("builder"),
+      config: {
+        model: "codex-5.4",
+        baseUrl: "https://api.openai.com/v1",
+        apiKey: "dummy",
+        executionMode: "agent",
+        sources: {
+          model: "default",
+          baseUrl: "default",
+          apiKey: "OPENAI_API_KEY",
+          executionMode: "default",
+        },
+      },
+    });
+
+    expect(observedDebugEvents.map((event) => event.type)).toEqual(
+      expect.arrayContaining([
+        "executor_stdout",
+        "executor_stderr",
+        "executor_exit",
+        "executor_result_payload",
+      ]),
+    );
+    expect(
+      observedDebugEvents.find((event) => event.type === "executor_stdout")?.message,
+    ).toBe("raw stdout line");
+    expect(
+      observedDebugEvents.find((event) => event.type === "executor_stderr")?.message,
+    ).toBe("raw stderr line");
+    expect(
+      observedDebugEvents.find((event) => event.type === "executor_exit")?.metadata?.code,
+    ).toBe(0);
+    expect(
+      observedDebugEvents.find((event) => event.type === "executor_result_payload")?.payload,
+    ).toBe('{"summary":"done","artifacts":[]}');
+  });
+
+  it("waits for async debug-event hooks on real child-process execution before returning", async () => {
+    const root = await createTempProject();
+    const projectDir = path.join(root, "project");
+    await mkdir(projectDir, { recursive: true });
+
+    const observedDebugEvents: Array<{
+      type: string;
+      message?: string;
+    }> = [];
+    const executor = new DefaultRoleAgentExecutor({
+      transport: new ChildProcessCliTransport(),
+      provider: {
+        providerKind: "test_provider",
+        async prepareExecution() {
+          return {
+            command: process.execPath,
+            args: [
+              "-e",
+              'process.stdout.write("raw stdout line\\n");process.stderr.write("raw stderr line\\n");process.stdout.write("trailing stdout");',
+            ],
+            cwd: projectDir,
+            stdin: "",
+            env: {},
+            timeoutMs: 1000,
+            readResult: async () => '{"summary":"done","artifacts":[]}',
+          };
+        },
+      },
+    });
+
+    const result = await executor.execute({
+      roleName: "builder",
+      prompt: "PROMPT",
+      context: {
+        taskId: "task_executor_real_transport_debug_case",
+        phase: "build",
+        cwd: projectDir,
+        projectConfig: createProjectConfig({
+          projectDir,
+          artifactDir: path.join(root, "artifacts"),
+          workflow: createWorkflowSelection("bugfix"),
+        }),
+        roleCapabilityProfile: createCapabilityProfile("builder"),
+        async emitDebugEvent(event) {
+          await delay(20);
+          observedDebugEvents.push(event);
+        },
+        artifacts: {
+          async get() {
+            return undefined;
+          },
+          async list() {
+            return [];
+          },
+        },
+      },
+      executionProfile: createCapabilityProfile("builder"),
+      config: {
+        model: "codex-5.4",
+        baseUrl: "https://api.openai.com/v1",
+        apiKey: "dummy",
+        executionMode: "agent",
+        sources: {
+          model: "default",
+          baseUrl: "default",
+          apiKey: "OPENAI_API_KEY",
+          executionMode: "default",
+        },
+      },
+    });
+
+    expect(result).toBe('{"summary":"done","artifacts":[]}');
+    expect(observedDebugEvents.map((event) => event.type)).toEqual(
+      expect.arrayContaining([
+        "executor_stdout",
+        "executor_stderr",
+        "executor_exit",
+        "executor_result_payload",
+      ]),
+    );
+    expect(
+      observedDebugEvents
+        .filter((event) => event.type === "executor_stdout")
+        .map((event) => event.message),
+    ).toEqual(["raw stdout line", "trailing stdout"]);
+    expect(
+      observedDebugEvents.find((event) => event.type === "executor_stderr")?.message,
+    ).toBe("raw stderr line\n");
+    expect(
+      observedDebugEvents.findIndex((event) => event.type === "executor_exit"),
+    ).toBeGreaterThan(
+      observedDebugEvents.reduce((index, event, currentIndex) => {
+        return event.type === "executor_stdout" ? currentIndex : index;
+      }, -1),
+    );
+  });
+
   it("resolves codex-specific role config from centralized environment variables", () => {
     const config = resolveRoleCodexConfig({
       OPENAI_API_KEY: "dummy",
@@ -1266,6 +1470,12 @@ async function createTempProject(): Promise<string> {
   const root = await mkdtemp(path.join(os.tmpdir(), "aegisflow-role-"));
   tempDirs.push(root);
   return root;
+}
+
+async function delay(ms: number): Promise<void> {
+  await new Promise<void>((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
 class FakeNodePtyTerminal {

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -58,6 +58,60 @@ describe("IntakeAgent", () => {
 
     expect(resumeLines.join("\n")).toContain(`恢复任务：${taskId}`);
     expect(resumeLines.join("\n")).toContain("Runtime 已重建");
+  });
+
+  it("flushes pre-task intake history into task debug events after task creation", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "aegisflow-agent-"));
+    tempDirs.push(root);
+    const projectDir = path.join(root, "project");
+    const artifactDir = path.join(root, "custom-artifacts");
+    await mkdir(projectDir, { recursive: true });
+    await writeProjectWorkflowConfig(projectDir);
+    const agent = new IntakeAgent(root);
+
+    await agent.handleUserInput("修复登录报错");
+    await agent.handleUserInput(projectDir);
+    await agent.handleUserInput("");
+    await agent.handleUserInput(artifactDir);
+
+    const [taskId] = await readdir(path.join(artifactDir, "tasks"));
+    const debugEvents = await readFile(
+      path.join(artifactDir, "tasks", taskId, "runtime", "debug-events.jsonl"),
+      "utf8",
+    );
+    const transcript = await readFile(
+      path.join(artifactDir, "tasks", taskId, "runtime", "debug-transcript.md"),
+      "utf8",
+    );
+    const parsedEvents = parseJsonLines(debugEvents) as Array<{
+      type: string;
+      message?: string;
+    }>;
+    const userInputs = parsedEvents
+      .filter((event) => event.type === "user_input")
+      .map((event) => event.message);
+    const artifactDirInputIndex = parsedEvents.findIndex(
+      (event) => event.type === "user_input" && event.message === artifactDir,
+    );
+    const runtimeInitMessageIndex = parsedEvents.findIndex(
+      (event) =>
+        event.type === "intake_message" &&
+        event.message?.includes("Runtime 初始化成功"),
+    );
+
+    expect(debugEvents).toContain('"type":"user_input"');
+    expect(userInputs).toEqual([
+      "修复登录报错",
+      projectDir,
+      "(empty input)",
+      artifactDir,
+    ]);
+    expect(debugEvents).toContain(`目标项目目录已确认：${projectDir}`);
+    expect(debugEvents).toContain("是否确认使用该 workflow？请回答 y/n，直接回车等同于 y。");
+    expect(artifactDirInputIndex).toBeGreaterThan(-1);
+    expect(runtimeInitMessageIndex).toBeGreaterThan(artifactDirInputIndex);
+    expect(transcript).toContain("lastUserInput:");
+    expect(transcript).toContain(artifactDir);
   });
 
   it("formats workflow events into readable cli blocks instead of raw object lines", async () => {
@@ -692,4 +746,12 @@ async function writeCustomWorkflowConfig(
     contentLines.join("\n"),
     "utf8",
   );
+}
+
+function parseJsonLines(content: string): unknown[] {
+  return content
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .map((line) => JSON.parse(line));
 }

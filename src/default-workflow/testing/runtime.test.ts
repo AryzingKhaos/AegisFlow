@@ -135,6 +135,190 @@ describe("workflow runtime", () => {
     expect(artifactRootEntries).not.toContain("workflow-events.jsonl");
   });
 
+  it("writes per-task debug events and transcript for successful tasks", async () => {
+    const root = await createTempProject();
+    const projectDir = path.join(root, "project");
+    const artifactDir = path.join(root, "artifacts");
+    await mkdir(projectDir, { recursive: true });
+
+    const workflowPhases: WorkflowPhaseConfig[] = [
+      {
+        name: "build",
+        hostRole: "builder",
+        needApproval: false,
+      },
+    ];
+    const projectConfig = createProjectConfig({
+      projectDir,
+      artifactDir,
+      workflow: createWorkflowSelection("feature_change"),
+      workflowPhases,
+    });
+    const artifactManager = new FileArtifactManager(projectConfig);
+    const taskState = createInitialTaskState(
+      "task_debug_success_case",
+      "debug_success_case",
+      workflowPhases,
+    );
+    await artifactManager.initializeTask(taskState.taskId);
+    await artifactManager.saveTaskContext({
+      taskId: taskState.taskId,
+      title: taskState.title,
+      description: "成功调试转录件用例",
+      createdAt: Date.now(),
+      lastRuntimeId: "runtime_debug_success_case",
+      projectConfig,
+    });
+
+    const controller = new DefaultWorkflowController({
+      taskState,
+      projectConfig,
+      eventEmitter: new EventEmitter(),
+      eventLogger: new MemoryEventLogger(),
+      artifactManager,
+      roleRegistry: new TestRoleRegistry({
+        builder: createRole("builder", async (_input, context) => {
+          await context.emitVisibleOutput?.({
+            message: "builder 正在输出中间进度",
+            kind: "progress",
+          });
+
+          return {
+            summary: "builder done",
+            artifacts: [],
+          };
+        }),
+      }),
+    });
+
+    await controller.run(taskState.taskId, "成功调试转录件用例");
+
+    const debugEvents = await readFile(
+      path.join(
+        artifactDir,
+        "tasks",
+        taskState.taskId,
+        "runtime",
+        "debug-events.jsonl",
+      ),
+      "utf8",
+    );
+    const transcript = await readFile(
+      path.join(
+        artifactDir,
+        "tasks",
+        taskState.taskId,
+        "runtime",
+        "debug-transcript.md",
+      ),
+      "utf8",
+    );
+
+    expect(debugEvents).toContain('"type":"workflow_event"');
+    expect(debugEvents).toContain('"type":"role_visible_output"');
+    expect(debugEvents).toContain("builder 正在输出中间进度");
+    expect(transcript).toContain("# Task Debug Transcript");
+    expect(transcript).toContain("## 任务概览");
+    expect(transcript).toContain("completionSummary: 任务完成。");
+    expect(transcript).toContain("runtimeFiles: task-state.json, task-state.md, task-context.json, workflow-events.jsonl, debug-events.jsonl");
+  });
+
+  it("highlights executor raw failures in task debug transcript", async () => {
+    const root = await createTempProject();
+    const projectDir = path.join(root, "project");
+    const artifactDir = path.join(root, "artifacts");
+    await mkdir(projectDir, { recursive: true });
+
+    const workflowPhases: WorkflowPhaseConfig[] = [
+      {
+        name: "build",
+        hostRole: "builder",
+        needApproval: false,
+      },
+    ];
+    const projectConfig = createProjectConfig({
+      projectDir,
+      artifactDir,
+      workflow: createWorkflowSelection("bugfix"),
+      workflowPhases,
+    });
+    const artifactManager = new FileArtifactManager(projectConfig);
+    const taskState = createInitialTaskState(
+      "task_debug_failure_case",
+      "debug_failure_case",
+      workflowPhases,
+    );
+    await artifactManager.initializeTask(taskState.taskId);
+    await artifactManager.saveTaskContext({
+      taskId: taskState.taskId,
+      title: taskState.title,
+      description: "失败调试转录件用例",
+      createdAt: Date.now(),
+      lastRuntimeId: "runtime_debug_failure_case",
+      projectConfig,
+    });
+
+    const controller = new DefaultWorkflowController({
+      taskState,
+      projectConfig,
+      eventEmitter: new EventEmitter(),
+      eventLogger: new MemoryEventLogger(),
+      artifactManager,
+      roleRegistry: new TestRoleRegistry({
+        builder: createRole("builder", async (_input, context) => {
+          await context.emitDebugEvent?.({
+            type: "executor_stderr",
+            source: "executor",
+            level: "error",
+            message: "Traceback: build failed hard",
+          });
+          await context.emitDebugEvent?.({
+            type: "executor_exit",
+            source: "executor",
+            level: "error",
+            message: "executor exited with code 1",
+            metadata: {
+              code: 1,
+              timedOut: false,
+            },
+          });
+          throw new Error("builder crashed");
+        }),
+      }),
+    });
+
+    await controller.run(taskState.taskId, "失败调试转录件用例");
+
+    const debugEvents = await readFile(
+      path.join(
+        artifactDir,
+        "tasks",
+        taskState.taskId,
+        "runtime",
+        "debug-events.jsonl",
+      ),
+      "utf8",
+    );
+    const transcript = await readFile(
+      path.join(
+        artifactDir,
+        "tasks",
+        taskState.taskId,
+        "runtime",
+        "debug-transcript.md",
+      ),
+      "utf8",
+    );
+
+    expect(debugEvents).toContain('"type":"executor_stderr"');
+    expect(debugEvents).toContain("Traceback: build failed hard");
+    expect(debugEvents).toContain('"type":"error"');
+    expect(transcript).toContain("## 关键错误");
+    expect(transcript).toContain("Traceback: build failed hard");
+    expect(transcript).toContain("builder crashed");
+    expect(transcript).toContain("latestExecutorSignal:");
+  });
+
   it("rebuilds runtime on resume and continues from the next approved phase", async () => {
     const root = await createTempProject();
     const projectDir = path.join(root, "project");

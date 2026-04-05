@@ -4,6 +4,7 @@ import type {
   ExecutionContext,
   RoleCapabilityProfile,
   RoleName,
+  TaskDebugEvent,
 } from "../shared/types";
 import type { RoleCodexConfig } from "./config";
 
@@ -55,7 +56,16 @@ export interface TransportExecutionRequest {
   stdin: string;
   env: Record<string, string | undefined>;
   timeoutMs: number;
-  onStdoutLine?: (line: string) => void;
+  onStdoutLine?: (line: string) => void | Promise<void>;
+  onStderrChunk?: (chunk: string) => void | Promise<void>;
+  onExit?: (result: {
+    code: number | null;
+    signal: string | null;
+    timedOut: boolean;
+    stderr: string;
+    stdoutRemainder?: string;
+  }) => void | Promise<void>;
+  onTransportError?: (error: Error) => void | Promise<void>;
 }
 
 export interface CliTransport {
@@ -70,7 +80,16 @@ export interface ProviderExecutionRequest {
   stdin: string;
   env: Record<string, string | undefined>;
   timeoutMs: number;
-  onStdoutLine?: (line: string) => void;
+  onStdoutLine?: (line: string) => void | Promise<void>;
+  onStderrChunk?: (chunk: string) => void | Promise<void>;
+  onExit?: (result: {
+    code: number | null;
+    signal: string | null;
+    timedOut: boolean;
+    stderr: string;
+    stdoutRemainder?: string;
+  }) => void | Promise<void>;
+  onTransportError?: (error: Error) => void | Promise<void>;
   flushVisibleOutput?(): Promise<void>;
   readResult(): Promise<string>;
 }
@@ -93,7 +112,7 @@ export interface CodexCliExecutorDependencies {
       input: string;
       env: Record<string, string | undefined>;
       timeoutMs: number;
-      onStdoutLine?: (line: string) => void;
+      onStdoutLine?: (line: string) => void | Promise<void>;
     },
   ) => Promise<void>;
 }
@@ -181,12 +200,107 @@ export class DefaultRoleAgentExecutor implements RoleAgentExecutor {
   public async execute(input: RoleAgentExecutionRequest): Promise<string> {
     try {
       const request = await this.provider.prepareExecution(input);
-      await this.transport.execute(request);
-      await request.flushVisibleOutput?.();
-      return await request.readResult();
+      const instrumentedRequest: ProviderExecutionRequest = {
+        ...request,
+        onStdoutLine: chainStdoutHandlers(request.onStdoutLine, async (line) => {
+          await emitExecutionDebugEvent(input.context, {
+            type: "executor_stdout",
+            source: "executor",
+            phase: input.context.phase,
+            roleName: input.roleName,
+            message: line,
+          });
+        }),
+        onStderrChunk: async (chunk) => {
+          await request.onStderrChunk?.(chunk);
+          await emitExecutionDebugEvent(input.context, {
+            type: "executor_stderr",
+            source: "executor",
+            level: "error",
+            phase: input.context.phase,
+            roleName: input.roleName,
+            message: chunk,
+          });
+        },
+        onExit: async (result) => {
+          await request.onExit?.(result);
+          await emitExecutionDebugEvent(input.context, {
+            type: "executor_exit",
+            source: "executor",
+            level:
+              result.timedOut ||
+              result.code !== 0 ||
+              (typeof result.signal === "string" && result.signal.length > 0)
+                ? "error"
+                : "info",
+            phase: input.context.phase,
+            roleName: input.roleName,
+            message:
+              result.timedOut
+                ? `executor timed out after ${String(request.timeoutMs)}ms`
+                : `executor exited with code ${String(result.code ?? 0)}`,
+            metadata: {
+              command: request.command,
+              args: request.args,
+              cwd: request.cwd,
+              timeoutMs: request.timeoutMs,
+              code: result.code,
+              signal: result.signal,
+              timedOut: result.timedOut,
+            },
+          });
+        },
+        onTransportError: async (error) => {
+          await request.onTransportError?.(error);
+          await emitExecutionDebugEvent(input.context, {
+            type: "error",
+            source: "executor",
+            level: "error",
+            phase: input.context.phase,
+            roleName: input.roleName,
+            message: "executor transport error",
+            metadata: {
+              rawError: error.message,
+              command: request.command,
+              args: request.args,
+              cwd: request.cwd,
+            },
+          });
+        },
+      };
+
+      await this.transport.execute(instrumentedRequest);
+      await instrumentedRequest.flushVisibleOutput?.();
+      const result = await instrumentedRequest.readResult();
+      await emitExecutionDebugEvent(input.context, {
+        type: "executor_result_payload",
+        source: "executor",
+        phase: input.context.phase,
+        roleName: input.roleName,
+        message: "executor returned final raw payload",
+        payload: result,
+        metadata: {
+          command: request.command,
+          args: request.args,
+          cwd: request.cwd,
+        },
+      });
+      return result;
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "unknown role execution error";
+
+      await emitExecutionDebugEvent(input.context, {
+        type: "error",
+        source: "executor",
+        level: "error",
+        phase: input.context.phase,
+        roleName: input.roleName,
+        message: "Role agent execution failed.",
+        metadata: {
+          rawError: message,
+        },
+      });
 
       throw new Error(`Role agent execution failed: ${message}`);
     }
@@ -273,50 +387,145 @@ async function runChildProcess(
     let stdoutBuffer = "";
     let stderrBuffer = "";
     let timeoutReached = false;
+    let settled = false;
+    let callbackQueue = Promise.resolve();
     const timer = setTimeout(() => {
       timeoutReached = true;
       child.kill("SIGKILL");
     }, request.timeoutMs);
 
+    const settleResolve = (): void => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      clearTimeout(timer);
+      resolve();
+    };
+
+    const settleReject = (error: unknown): void => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      clearTimeout(timer);
+      reject(normalizeUnknownError(error));
+    };
+
+    const enqueueCallback = (
+      operation: () => void | Promise<void>,
+    ): Promise<void> => {
+      const next = callbackQueue.then(operation);
+      callbackQueue = next.catch(() => {});
+      return next;
+    };
+
+    const observeCallback = (
+      operation: () => void | Promise<void>,
+      options: {
+        killOnError?: boolean;
+        onSuccess?: () => void;
+      } = {},
+    ): void => {
+      void enqueueCallback(operation).then(
+        () => {
+          options.onSuccess?.();
+        },
+        (error) => {
+          if (options.killOnError) {
+            child.kill("SIGKILL");
+          }
+          settleReject(error);
+        },
+      );
+    };
+
     child.stdout.on("data", (chunk: unknown) => {
-      stdoutBuffer = flushStdoutLines(
-        `${stdoutBuffer}${normalizeProcessChunk(chunk)}`,
-        request.onStdoutLine,
+      if (settled) {
+        return;
+      }
+
+      const normalizedChunk = normalizeProcessChunk(chunk);
+      observeCallback(
+        async () => {
+          stdoutBuffer = await flushStdoutLines(
+            `${stdoutBuffer}${normalizedChunk}`,
+            request.onStdoutLine,
+          );
+        },
+        { killOnError: true },
       );
     });
 
     child.stderr.on("data", (chunk: unknown) => {
-      stderrBuffer += normalizeProcessChunk(chunk);
+      if (settled) {
+        return;
+      }
+
+      const normalizedChunk = normalizeProcessChunk(chunk);
+      observeCallback(
+        async () => {
+          stderrBuffer += normalizedChunk;
+          await request.onStderrChunk?.(normalizedChunk);
+        },
+        { killOnError: true },
+      );
     });
 
     child.on("error", (error) => {
-      clearTimeout(timer);
-      reject(error);
+      if (settled) {
+        return;
+      }
+
+      observeCallback(async () => {
+        await request.onTransportError?.(error);
+        throw error;
+      });
     });
 
     child.on("close", (code, signal) => {
-      clearTimeout(timer);
-
-      if (stdoutBuffer.length > 0) {
-        request.onStdoutLine?.(stdoutBuffer.replace(/\r$/, ""));
-      }
-
-      if (timeoutReached) {
-        reject(new Error(`command timed out after ${String(request.timeoutMs)}ms`));
+      if (settled) {
         return;
       }
 
-      if (code !== 0) {
-        const failureReason = stderrBuffer.trim() || `process exited with code ${String(code)}`;
-        reject(
-          new Error(
-            signal ? `${failureReason} (signal: ${signal})` : failureReason,
-          ),
-        );
-        return;
-      }
+      observeCallback(
+        async () => {
+          const stdoutRemainder =
+            stdoutBuffer.length > 0 ? stdoutBuffer.replace(/\r$/, "") : undefined;
 
-      resolve();
+          if (stdoutRemainder) {
+            stdoutBuffer = "";
+            await request.onStdoutLine?.(stdoutRemainder);
+          }
+
+          await request.onExit?.({
+            code,
+            signal,
+            timedOut: timeoutReached,
+            stderr: stderrBuffer,
+            stdoutRemainder,
+          });
+
+          if (timeoutReached) {
+            throw new Error(`command timed out after ${String(request.timeoutMs)}ms`);
+          }
+
+          if (code !== 0) {
+            const failureReason =
+              stderrBuffer.trim() || `process exited with code ${String(code)}`;
+            throw new Error(
+              signal ? `${failureReason} (signal: ${signal})` : failureReason,
+            );
+          }
+        },
+        {
+          onSuccess: () => {
+            settleResolve();
+          },
+        },
+      );
     });
 
     if (request.stdin.length > 0) {
@@ -327,16 +536,16 @@ async function runChildProcess(
   });
 }
 
-function flushStdoutLines(
+async function flushStdoutLines(
   buffer: string,
-  onStdoutLine?: (line: string) => void,
-): string {
+  onStdoutLine?: (line: string) => void | Promise<void>,
+): Promise<string> {
   let cursor = buffer.indexOf("\n");
   let remaining = buffer;
 
   while (cursor >= 0) {
     const line = remaining.slice(0, cursor).replace(/\r$/, "");
-    onStdoutLine?.(line);
+    await onStdoutLine?.(line);
     remaining = remaining.slice(cursor + 1);
     cursor = remaining.indexOf("\n");
   }
@@ -391,6 +600,36 @@ function visibleLineEmitter(
       setPendingOutput(nextPendingOutput);
     }
   };
+}
+
+function chainStdoutHandlers(
+  primary: ((line: string) => void | Promise<void>) | undefined,
+  secondary: (line: string) => Promise<void>,
+): (line: string) => Promise<void> {
+  return async (line: string) => {
+    await primary?.(line);
+    await secondary(line);
+  };
+}
+
+function normalizeUnknownError(error: unknown): Error {
+  if (error instanceof Error) {
+    return error;
+  }
+
+  return new Error(String(error ?? "unknown child process error"));
+}
+
+async function emitExecutionDebugEvent(
+  context: ExecutionContext,
+  event: Omit<TaskDebugEvent, "taskId" | "timestamp"> & {
+    timestamp?: number;
+  },
+): Promise<void> {
+  await context.emitDebugEvent?.({
+    ...event,
+    timestamp: event.timestamp ?? Date.now(),
+  });
 }
 
 function buildCodexCommandArgs(

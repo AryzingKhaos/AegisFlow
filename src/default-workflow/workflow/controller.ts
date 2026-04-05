@@ -9,6 +9,7 @@ import type {
   RoleName,
   RoleRegistry,
   RoleResult,
+  TaskDebugEvent,
   RoleVisibleOutput,
   TaskState,
   WorkflowController,
@@ -149,6 +150,17 @@ export class DefaultWorkflowController implements WorkflowController {
               return;
             }
 
+            await this.appendDebugEvent({
+              type: "role_visible_output",
+              source: "role",
+              phase,
+              roleName,
+              message: output.message,
+              metadata: {
+                outputKind: output.kind ?? "progress",
+              },
+            });
+
             await this.pushEvent(
               options.workflowEvents ?? [],
               "role_output",
@@ -161,6 +173,17 @@ export class DefaultWorkflowController implements WorkflowController {
             );
           }
         : undefined,
+      emitDebugEvent: async (
+        event: Omit<TaskDebugEvent, "taskId" | "timestamp"> & {
+          timestamp?: number;
+        },
+      ) => {
+        await this.appendDebugEvent({
+          ...event,
+          phase: event.phase ?? phase,
+          roleName: event.roleName ?? roleName,
+        });
+      },
     };
 
     return role.run(input, context);
@@ -1010,6 +1033,23 @@ export class DefaultWorkflowController implements WorkflowController {
     const event = this.createWorkflowEvent(type, message, metadata);
     workflowEvents.push(event);
     await this.dependencies.eventLogger.append(event);
+    await this.appendDebugEvent({
+      type: "workflow_event",
+      source: "workflow",
+      phase:
+        typeof metadata?.phase === "string"
+          ? (metadata.phase as Phase)
+          : event.taskState.currentPhase,
+      roleName:
+        typeof metadata?.roleName === "string"
+          ? (metadata.roleName as RoleName)
+          : undefined,
+      message,
+      payload: event,
+      metadata: {
+        workflowEventType: type,
+      },
+    });
     this.dependencies.eventEmitter.emit("workflow_event", event);
   }
 
@@ -1018,6 +1058,19 @@ export class DefaultWorkflowController implements WorkflowController {
     // 保证下次恢复看到的是同一轮执行留下的磁盘状态。
     await this.dependencies.artifactManager.saveTaskState(this.dependencies.taskState);
     await this.syncPersistedContext();
+    await this.appendDebugEvent({
+      type: "snapshot_reference",
+      source: "workflow",
+      phase: this.dependencies.taskState.currentPhase,
+      roleName: this.dependencies.taskState.resumeFrom?.roleName,
+      message: `任务快照已更新：${reason}`,
+      metadata: {
+        reason,
+        taskStatePath: "runtime/task-state.json",
+        taskStateMarkdownPath: "runtime/task-state.md",
+        taskContextPath: "runtime/task-context.json",
+      },
+    });
     this.dependencies.eventEmitter.emit("workflow_snapshot", {
       taskId: this.dependencies.taskState.taskId,
       reason,
@@ -1089,6 +1142,21 @@ export class DefaultWorkflowController implements WorkflowController {
     });
     await this.saveSnapshot("task_failed");
     return workflowEvents;
+  }
+
+  private async appendDebugEvent(
+    event: Omit<TaskDebugEvent, "taskId" | "timestamp"> & {
+      timestamp?: number;
+    },
+  ): Promise<void> {
+    await this.dependencies.artifactManager.appendDebugEvent(
+      this.dependencies.taskState.taskId,
+      {
+        taskId: this.dependencies.taskState.taskId,
+        timestamp: event.timestamp ?? Date.now(),
+        ...event,
+      },
+    );
   }
 
   private getCurrentPhaseConfigSafe(): WorkflowPhaseConfig | null {

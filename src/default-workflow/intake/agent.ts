@@ -28,6 +28,7 @@ import type {
   ProjectWorkflowDefinition,
   PersistedTaskContext,
   Runtime,
+  TaskDebugEvent,
   WorkflowEvent,
 } from "../shared/types";
 import { TaskStatus } from "../shared/types";
@@ -71,11 +72,16 @@ interface IntakeAgentOptions {
   onWorkflowEvent?: (event: WorkflowEvent) => void;
 }
 
+type DebugEventInput = Omit<TaskDebugEvent, "taskId" | "timestamp"> & {
+  timestamp?: number;
+};
+
 export class IntakeAgent {
   private runtime?: Runtime;
   private persistedContext?: PersistedTaskContext;
   private draft?: DraftTask;
   private pendingStep?: PendingStep;
+  private draftDebugEvents: DebugEventInput[] = [];
   private workflowOutputBuffer: string[] = [];
   private readonly modelBootstrap = initializeIntakeModel();
 
@@ -95,76 +101,112 @@ export class IntakeAgent {
 
   public async handleUserInput(rawInput: string): Promise<string[]> {
     const input = rawInput.trim();
+    const runtimeTaskIdBefore = this.runtime?.taskState.taskId;
+    const hadDraft = Boolean(this.draft);
+    const hadActiveRuntime = Boolean(this.runtime) && !this.isTerminalTaskState();
+    const inputTimestamp = Date.now();
+    const pendingStepBefore = this.pendingStep;
+    let lines: string[];
+
+    if (hadDraft) {
+      await this.queueDraftDebugEvent({
+        timestamp: inputTimestamp,
+        type: "user_input",
+        source: "intake",
+        message: formatDebugInputText(input),
+        metadata: {
+          pendingStep: pendingStepBefore ?? "draft_transition",
+        },
+      });
+    } else if (hadActiveRuntime && runtimeTaskIdBefore) {
+      await this.appendRuntimeDebugEvent(runtimeTaskIdBefore, {
+        timestamp: inputTimestamp,
+        type: "user_input",
+        source: "intake",
+        message: formatDebugInputText(input),
+      });
+    }
+
     try {
-      if (
-        !input &&
-        this.pendingStep !== "confirm_workflow" &&
-        this.pendingStep !== "collect_project_dir" &&
-        this.pendingStep !== "collect_artifact_dir"
-      ) {
-        return ["请输入需求或任务控制指令。"];
-      }
-
-      if (this.pendingStep && input) {
-        // 控制指令必须优先于资料收集处理，这样用户在追问阶段也能取消
-        // 或恢复任务，而不会被误判成普通资料输入。
-        const pendingControlLines = await this.handlePendingStepControlIntent(input);
-
-        if (pendingControlLines) {
-          return pendingControlLines;
-        }
-      }
-
-      if (this.pendingStep) {
-        return this.handlePendingStep(input);
-      }
-
-      // 当 Intake 不再处于追问阶段后，所有输入都先经过统一意图归一化，
-      // 然后才决定是否触达 Runtime。
-      const hasActiveTask = this.hasActiveTask();
-      const intent = normalizeUserIntent(input, hasActiveTask);
-
-      if (intent.type === "out_of_scope") {
-        return [OUT_OF_SCOPE_REPLY];
-      }
-
-      if (intent.type === "resume_task") {
-        return this.resumeTask(intent.normalizedMessage);
-      }
-
-      if (intent.type === "cancel_task") {
-        return this.cancelTask(intent.normalizedMessage);
-      }
-
-      if (intent.type === "participate" && this.runtime) {
-        return this.dispatchRuntimeEvent("participate", intent.normalizedMessage);
-      }
-
-      return this.startDraftTask(intent.normalizedMessage);
+      lines = await this.handleUserInputInternal(input);
     } catch (error) {
-      return this.emitUnknownIntakeError(error, {
+      lines = this.emitUnknownIntakeError(error, {
         summary: "Intake 处理失败。",
         source: "intake",
       });
     }
+
+    const runtimeTaskIdAfter = this.runtime?.taskState.taskId;
+    const runtimeCreatedThisTurn =
+      typeof runtimeTaskIdAfter === "string" &&
+      runtimeTaskIdAfter.length > 0 &&
+      runtimeTaskIdAfter !== runtimeTaskIdBefore;
+
+    if (!hadDraft && !hadActiveRuntime && this.draft) {
+      await this.queueDraftDebugEvent({
+        timestamp: inputTimestamp,
+        type: "user_input",
+        source: "intake",
+        message: formatDebugInputText(input),
+        metadata: {
+          pendingStep: this.pendingStep ?? "draft_created",
+        },
+      });
+    } else if (!hadDraft && !hadActiveRuntime && runtimeCreatedThisTurn && runtimeTaskIdAfter) {
+      await this.appendRuntimeDebugEvent(runtimeTaskIdAfter, {
+        timestamp: inputTimestamp,
+        type: "user_input",
+        source: "intake",
+        message: formatDebugInputText(input),
+      });
+    }
+
+    if (lines.length > 0) {
+      if ((runtimeCreatedThisTurn || hadActiveRuntime) && runtimeTaskIdAfter) {
+        await this.recordIntakeMessagesForTask(runtimeTaskIdAfter, lines);
+      } else if (this.draft || hadDraft) {
+        await this.recordDraftIntakeMessages(lines);
+      }
+    }
+
+    return lines;
   }
 
   public async handleInterruptSignal(): Promise<{
     lines: string[];
     shouldExit: boolean;
   }> {
+    const taskId = this.runtime?.taskState.taskId;
+
+    if (taskId) {
+      await this.appendRuntimeDebugEvent(taskId, {
+        type: "user_input",
+        source: "intake",
+        message: "Interrupted by control + C.",
+        metadata: {
+          control: "interrupt_task",
+        },
+      });
+    }
+
     if (!this.runtime || this.isTerminalTaskState()) {
-      return {
+      const result = {
         lines: ["没有运行中的任务，CLI 即将退出。"],
         shouldExit: true,
       };
+      if (taskId) {
+        await this.recordIntakeMessagesForTask(taskId, result.lines);
+      }
+      return result;
     }
 
     if (this.runtime.taskState.status === "interrupted") {
-      return {
+      const result = {
         lines: ["任务已经处于中断态，CLI 即将退出。"],
         shouldExit: true,
       };
+      await this.recordIntakeMessagesForTask(this.runtime.taskState.taskId, result.lines);
+      return result;
     }
 
     const lines = await this.dispatchRuntimeEvent(
@@ -172,10 +214,12 @@ export class IntakeAgent {
       "Interrupted by control + C.",
     );
 
-    return {
+    const result = {
       lines,
       shouldExit: false,
     };
+    await this.recordIntakeMessagesForTask(this.runtime.taskState.taskId, result.lines);
+    return result;
   }
 
   public shouldHandleInputAsLiveParticipation(rawInput: string): boolean {
@@ -208,8 +252,53 @@ export class IntakeAgent {
       this.runtime.eventEmitter.removeAllListeners("workflow_event");
       this.runtime = undefined;
       this.persistedContext = undefined;
+      this.draftDebugEvents = [];
       this.workflowOutputBuffer = [];
     }
+  }
+
+  private async handleUserInputInternal(input: string): Promise<string[]> {
+    if (
+      !input &&
+      this.pendingStep !== "confirm_workflow" &&
+      this.pendingStep !== "collect_project_dir" &&
+      this.pendingStep !== "collect_artifact_dir"
+    ) {
+      return ["请输入需求或任务控制指令。"];
+    }
+
+    if (this.pendingStep && input) {
+      const pendingControlLines = await this.handlePendingStepControlIntent(input);
+
+      if (pendingControlLines) {
+        return pendingControlLines;
+      }
+    }
+
+    if (this.pendingStep) {
+      return this.handlePendingStep(input);
+    }
+
+    const hasActiveTask = this.hasActiveTask();
+    const intent = normalizeUserIntent(input, hasActiveTask);
+
+    if (intent.type === "out_of_scope") {
+      return [OUT_OF_SCOPE_REPLY];
+    }
+
+    if (intent.type === "resume_task") {
+      return this.resumeTask(intent.normalizedMessage);
+    }
+
+    if (intent.type === "cancel_task") {
+      return this.cancelTask(intent.normalizedMessage);
+    }
+
+    if (intent.type === "participate" && this.runtime) {
+      return this.dispatchRuntimeEvent("participate", intent.normalizedMessage);
+    }
+
+    return this.startDraftTask(intent.normalizedMessage);
   }
 
   private async handlePendingStep(input: string): Promise<string[]> {
@@ -375,6 +464,7 @@ export class IntakeAgent {
     }
 
     this.attachRuntime(buildResult.runtime, buildResult.persistedContext);
+    await this.flushDraftDebugEventsToRuntime();
     // 在工件目录之外额外保存最近可恢复任务索引，确保后续 CLI 会话
     // 也能准确恢复使用自定义工件目录的任务。
     await this.saveResumeIndex(buildResult.persistedContext);
@@ -448,6 +538,7 @@ export class IntakeAgent {
     }
 
     this.attachRuntime(buildResult.runtime, buildResult.persistedContext);
+    await this.flushDraftDebugEventsToRuntime();
     await this.saveResumeIndex(buildResult.persistedContext);
 
     const lines = [
@@ -580,6 +671,7 @@ export class IntakeAgent {
   }
 
   private emitIntakeError(error: IntakeErrorView): string[] {
+    void this.recordIntakeErrorEvent(error);
     this.options.onIntakeError?.(error);
 
     if (this.options.onIntakeError) {
@@ -587,6 +679,98 @@ export class IntakeAgent {
     }
 
     return formatIntakeErrorForCli(error);
+  }
+
+  private async queueDraftDebugEvent(
+    event: DebugEventInput,
+  ): Promise<void> {
+    this.draftDebugEvents.push({
+      ...event,
+      timestamp: event.timestamp ?? Date.now(),
+    });
+  }
+
+  private async appendRuntimeDebugEvent(
+    taskId: string,
+    event: DebugEventInput,
+  ): Promise<void> {
+    const artifactManager = this.runtime?.artifactManager;
+
+    if (!artifactManager) {
+      return;
+    }
+
+    await artifactManager.appendDebugEvent(taskId, {
+      taskId,
+      ...event,
+      timestamp: event.timestamp ?? Date.now(),
+    });
+  }
+
+  private async flushDraftDebugEventsToRuntime(): Promise<void> {
+    const taskId = this.runtime?.taskState.taskId;
+    const artifactManager = this.runtime?.artifactManager;
+
+    if (!taskId || !artifactManager || this.draftDebugEvents.length === 0) {
+      return;
+    }
+
+    const events = this.draftDebugEvents.map((event) => ({
+      taskId,
+      ...event,
+      timestamp: event.timestamp ?? Date.now(),
+    }));
+
+    this.draftDebugEvents = [];
+    await artifactManager.appendDebugEvents(taskId, events);
+  }
+
+  private async recordDraftIntakeMessages(lines: string[]): Promise<void> {
+    for (const line of lines) {
+      await this.queueDraftDebugEvent({
+        type: "intake_message",
+        source: "intake",
+        message: line,
+      });
+    }
+  }
+
+  private async recordIntakeMessagesForTask(
+    taskId: string,
+    lines: string[],
+  ): Promise<void> {
+    for (const line of lines) {
+      await this.appendRuntimeDebugEvent(taskId, {
+        type: "intake_message",
+        source: "intake",
+        message: line,
+      });
+    }
+  }
+
+  private async recordIntakeErrorEvent(error: IntakeErrorView): Promise<void> {
+    const event: DebugEventInput = {
+      type: "error",
+      source: "intake",
+      level: "error",
+      message: error.summary,
+      payload: error.reason,
+      metadata: {
+        location: error.location,
+        nextAction: error.nextAction,
+        source: error.source,
+        rawError: error.reason,
+      },
+    };
+
+    if (this.draft) {
+      await this.queueDraftDebugEvent(event);
+      return;
+    }
+
+    if (this.runtime?.taskState.taskId) {
+      await this.appendRuntimeDebugEvent(this.runtime.taskState.taskId, event);
+    }
   }
 
   private async handlePendingStepControlIntent(
@@ -884,4 +1068,8 @@ function countSharedTerms(left: Set<string>, right: Set<string>): number {
   }
 
   return count;
+}
+
+function formatDebugInputText(input: string): string {
+  return input.length > 0 ? input : "(empty input)";
 }

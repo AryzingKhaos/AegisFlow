@@ -148,6 +148,31 @@ export interface WorkflowEvent {
   metadata?: Record<string, unknown>;
 }
 
+export type TaskDebugEventType =
+  | "user_input"
+  | "intake_message"
+  | "workflow_event"
+  | "role_visible_output"
+  | "executor_stdout"
+  | "executor_stderr"
+  | "executor_exit"
+  | "executor_result_payload"
+  | "error"
+  | "snapshot_reference";
+
+export interface TaskDebugEvent {
+  taskId: string;
+  timestamp: number;
+  type: TaskDebugEventType;
+  source: "intake" | "workflow" | "role" | "executor";
+  level?: "info" | "error";
+  phase?: Phase;
+  roleName?: RoleName;
+  message?: string;
+  payload?: unknown;
+  metadata?: Record<string, unknown>;
+}
+
 export interface PersistedTaskContext {
   taskId: string;
   title: string;
@@ -210,6 +235,9 @@ export interface ExecutionContext {
   projectConfig: ProjectConfig;
   roleCapabilityProfile: RoleCapabilityProfile;
   emitVisibleOutput?: (output: RoleVisibleOutput) => Promise<void>;
+  emitDebugEvent?: (event: Omit<TaskDebugEvent, "taskId" | "timestamp"> & {
+    timestamp?: number;
+  }) => Promise<void>;
 }
 
 export interface EventLogger {
@@ -220,6 +248,8 @@ export interface ArtifactManager {
   initializeTask(taskId: string): Promise<void>;
   saveTaskState(taskState: TaskState): Promise<string>;
   saveTaskContext(context: PersistedTaskContext): Promise<string>;
+  appendDebugEvent(taskId: string, event: TaskDebugEvent): Promise<string>;
+  appendDebugEvents(taskId: string, events: TaskDebugEvent[]): Promise<string>;
   saveArtifact(taskId: string, artifact: TaskArtifact): Promise<string>;
   createArtifactReader(taskId: string): ArtifactReader;
   loadTaskState(taskId: string): Promise<TaskState>;
