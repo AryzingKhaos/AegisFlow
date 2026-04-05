@@ -26,3 +26,4 @@
 | `default-workflow-final-artifact-markdown-output` | [default-workflow-final-artifact-markdown-output-prd.md](default-workflow-final-artifact-markdown-output-prd.md) | `default-workflow` 的 phase 最终工件必须输出为可读 Markdown、并与 `RoleResult` 结构化包络解耦的需求文档 |
 | `default-workflow-phase-artifact-input-phases` | [default-workflow-phase-artifact-input-phases-prd.md](default-workflow-phase-artifact-input-phases-prd.md) | `default-workflow` 的 phase 工件输入来源可配置、未配置时默认读取上一阶段工件的需求文档 |
 | `default-workflow-intake-ui-theme-refinement` | [default-workflow-intake-ui-theme-refinement-prd.md](default-workflow-intake-ui-theme-refinement-prd.md) | `default-workflow` 的 Intake UI 结果区、骨架区配色和整体结构向 codex 风格收敛的需求文档 |
+| `default-workflow-intake-output-structure-separation` | [default-workflow-intake-output-structure-separation-prd.md](default-workflow-intake-output-structure-separation-prd.md) | `default-workflow` 的 Intake UI 输出区必须维持结果区、骨架区、过程输出区结构分离，禁止回退为单一混排输出面板的需求文档 |
