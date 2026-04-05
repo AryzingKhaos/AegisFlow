@@ -338,6 +338,7 @@ interface PhaseConfig {
    name: Phase;
    hostRole: string;
    needApproval: boolean;
+   artifactInputPhases?: Phase[]; // 当前 phase 需要读取哪些阶段的工件；未配置时默认只读取上一阶段
 }
 
 // 用于管理所有 Host Role Controller。registry 负责“有哪些 role 当前存在”，active hostRole 由 workflow 根据 phase.hostRole 决定
@@ -537,6 +538,8 @@ type LogEvent = {
  - 多个 role 可以同时存在，但只有 active hostRole 能向 Intake 输出，也只有 active hostRole 能接收 Intake 输入
  - 执行过程中可以产生用户可见的增量输出，但不能直接写 CLI，必须通过 Workflow 转发
  - 任务完成后但 Intake 未销毁时，role 运行时可以继续保留
+ - phase 间工件输入默认按“上一阶段 -> 下一阶段”传递，但 workflow 配置可以通过 `artifactInputPhases` 显式声明“当前 phase 需要读取哪些阶段的工件”
+ - `artifactInputPhases` 未配置时，默认只暴露上一阶段工件；已配置时，应按配置的 phase 列表组合暴露对应阶段的最终工件
 
 
 ## 7.配置文件示例
@@ -572,30 +575,37 @@ workflows:
       - name: "explore"
         hostRole: "explorer"
         needApproval: false
+        artifactInputPhases: ["clarify"] # 显式写法；不写时默认也是上一阶段 clarify
 
       - name: "plan"
         hostRole: "planner"
         needApproval: true
+        artifactInputPhases: ["clarify", "explore"] # plan 同时消费 clarify 与 explore 的工件
 
       - name: "build"
         hostRole: "builder"
         needApproval: false
+        artifactInputPhases: ["clarify", "plan"] # build 需要需求澄清结果和最终计划
 
       - name: "review"
         hostRole: "critic"
         needApproval: true
+        artifactInputPhases: ["clarify", "plan", "build"]
 
       - name: "test-design"
         hostRole: "test-designer"
         needApproval: false
+        artifactInputPhases: ["clarify", "plan", "build", "review"]
 
       - name: "unit-test"
         hostRole: "test-writer"
         needApproval: false
+        artifactInputPhases: ["clarify", "plan", "build", "review", "test-design"]
 
       - name: "test"
         hostRole: "tester"
         needApproval: false
+        artifactInputPhases: ["clarify", "plan", "build", "review", "test-design", "unit-test"]
 
   - name: "analysis-only-workflow"
     description: "适用于先做需求澄清、代码探索和方案规划，不立即改代码的场景，例如陌生项目调研、方案预研、影响面分析。"
@@ -611,6 +621,18 @@ workflows:
       - name: "plan"
         hostRole: "planner"
         needApproval: true
+
+  - name: "fast-build-workflow"
+    description: "适用于澄清范围很小、可以直接基于计划进入实现的场景。某些 phase 不一定依赖 clarify 工件，而是只依赖 plan 工件。"
+    phases:
+      - name: "plan"
+        hostRole: "planner"
+        needApproval: true
+
+      - name: "build"
+        hostRole: "builder"
+        needApproval: false
+        artifactInputPhases: ["plan"] # 这个 workflow 中 build 只消费 plan 工件，不强依赖 clarify
 
 roles:
   prototypeDir: "/Users/aaron/code/roleflow/roles" # 角色原型目录
@@ -648,3 +670,11 @@ logging:
   level: "info" # debug / info / warn / error
   saveToFile: true
 ```
+
+补充说明：
+
+- `artifactInputPhases` 表示“当前 phase 需要读取哪些阶段的工件”。
+- 字段值使用 phase 名数组，例如 `["clarify", "plan"]`。
+- 未配置 `artifactInputPhases` 时，默认行为保持不变：当前 phase 只读取上一阶段工件。
+- 已配置 `artifactInputPhases` 时，当前 phase 应读取这些 phase 的最终工件，而不是只读取紧邻上一阶段。
+- 该字段是 workflow 级配置，因此同一个 `build` phase 在不同 workflow 中可以依赖不同的上游工件集合。

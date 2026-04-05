@@ -855,35 +855,60 @@ export class DefaultWorkflowController implements WorkflowController {
     phase: Phase,
   ): Promise<string[]> {
     const allKeys = await artifactReader.list();
+    const sourcePhases = this.resolveArtifactSourcePhases(phase);
+    const visibleKeys: string[] = [];
 
-    if (phase === "clarify") {
-      return allKeys
-        .filter((key) => key.startsWith("clarify/"))
-        .sort();
+    for (const sourcePhase of sourcePhases) {
+      const finalArtifactKey = this.resolveVisibleFinalArtifactKey(
+        allKeys,
+        sourcePhase,
+      );
+
+      if (finalArtifactKey) {
+        visibleKeys.push(finalArtifactKey);
+      }
     }
 
-    const previousPhase = this.getPreviousPhaseConfig(phase);
+    return visibleKeys;
+  }
 
-    if (!previousPhase) {
+  private resolveArtifactSourcePhases(phase: Phase): WorkflowPhaseConfig[] {
+    if (phase === "clarify") {
       return [];
     }
 
-    if (previousPhase.name === "clarify") {
-      const finalArtifactKey = `clarify/${resolveFinalArtifactDefinition("clarify", previousPhase.hostRole).key}`;
+    const currentPhaseConfig = this.getPhaseConfig(phase);
+    const configuredSourcePhases = currentPhaseConfig.artifactInputPhases;
 
-      return allKeys.includes(finalArtifactKey) ? [finalArtifactKey] : [];
+    if (configuredSourcePhases !== undefined) {
+      return this.getWorkflowPhasesInConfiguredOrder(configuredSourcePhases);
     }
 
-    const finalArtifactKey = `${previousPhase.name}/${resolveFinalArtifactDefinition(previousPhase.name, previousPhase.hostRole).key}`;
-    const previousPhaseKeys = allKeys
-      .filter((key) => key.startsWith(`${previousPhase.name}/`))
+    const previousPhase = this.getPreviousPhaseConfig(phase);
+    return previousPhase ? [previousPhase] : [];
+  }
+
+  private getWorkflowPhasesInConfiguredOrder(
+    phaseNames: Phase[],
+  ): WorkflowPhaseConfig[] {
+    return phaseNames.map((phaseName) => this.getPhaseConfig(phaseName));
+  }
+
+  private resolveVisibleFinalArtifactKey(
+    allKeys: string[],
+    sourcePhase: WorkflowPhaseConfig,
+  ): string | undefined {
+    const finalArtifactKey = `${sourcePhase.name}/${resolveFinalArtifactDefinition(sourcePhase.name, sourcePhase.hostRole).key}`;
+
+    if (allKeys.includes(finalArtifactKey)) {
+      return finalArtifactKey;
+    }
+
+    const phaseKeys = allKeys
+      .filter((key) => key.startsWith(`${sourcePhase.name}/`))
       .sort();
 
-    if (previousPhaseKeys.includes(finalArtifactKey)) {
-      return [finalArtifactKey];
-    }
-
-    return previousPhaseKeys.length > 0 ? [previousPhaseKeys[0]] : [];
+    return phaseKeys[0];
   }
 
   private resolveClarifyDecision(

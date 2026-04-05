@@ -936,6 +936,411 @@ describe("workflow runtime", () => {
     ).toBe(true);
   });
 
+  it("uses explicit artifactInputPhases to expose multiple source phases to build", async () => {
+    const root = await createTempProject();
+    const projectDir = path.join(root, "project");
+    const artifactDir = path.join(root, "artifacts");
+    await mkdir(projectDir, { recursive: true });
+
+    const workflowPhases: WorkflowPhaseConfig[] = [
+      {
+        name: "clarify",
+        hostRole: "clarifier",
+        needApproval: false,
+      },
+      {
+        name: "plan",
+        hostRole: "planner",
+        needApproval: false,
+        artifactInputPhases: ["clarify"],
+      },
+      {
+        name: "build",
+        hostRole: "builder",
+        needApproval: false,
+        artifactInputPhases: ["clarify", "plan"],
+      },
+    ];
+    const projectConfig = createProjectConfig({
+      projectDir,
+      artifactDir,
+      workflow: createWorkflowSelection("feature_change"),
+      workflowPhases,
+    });
+    const artifactManager = new FileArtifactManager(projectConfig);
+    const taskState = createInitialTaskState(
+      "task_multi_phase_artifact_input",
+      "multi_phase_artifact_input",
+      workflowPhases,
+    );
+    await artifactManager.initializeTask(taskState.taskId);
+    await artifactManager.saveTaskContext({
+      taskId: taskState.taskId,
+      title: taskState.title,
+      description: "多来源工件输入",
+      createdAt: Date.now(),
+      lastRuntimeId: "runtime_multi_phase_artifact_input",
+      projectConfig,
+    });
+
+    const controller = new DefaultWorkflowController({
+      taskState,
+      projectConfig,
+      eventEmitter: new EventEmitter(),
+      eventLogger: new MemoryEventLogger(),
+      artifactManager,
+      roleRegistry: new TestRoleRegistry({
+        clarifier: createRole("clarifier", async (input) => {
+          if (input.includes("正式生成 PRD")) {
+            return {
+              summary: "clarify final prd",
+              artifacts: ["# Clarify PRD\n\nsource from clarify"],
+              metadata: {
+                decision: "final_prd_generated",
+              },
+            };
+          }
+
+          return {
+            summary: "clarifier ready-for-prd",
+            artifacts: [],
+            metadata: {
+              decision: "ready_for_prd",
+            },
+          };
+        }),
+        planner: createRole("planner", async (_input, context) => {
+          expect(await context.artifacts.list()).toEqual(["clarify/final-prd"]);
+
+          return {
+            summary: "planner summary",
+            artifacts: ["# Plan\n\nsource from plan"],
+          };
+        }),
+        builder: createRole("builder", async (_input, context) => {
+          expect(await context.artifacts.list()).toEqual([
+            "clarify/final-prd",
+            "plan/plan-planner-1",
+          ]);
+          expect(await context.artifacts.get("clarify/final-prd")).toContain(
+            "source from clarify",
+          );
+          expect(await context.artifacts.get("plan/plan-planner-1")).toContain(
+            "source from plan",
+          );
+
+          return {
+            summary: "builder summary",
+            artifacts: ["# Build\n\nimplemented"],
+          };
+        }),
+      }),
+    });
+
+    await controller.run(taskState.taskId, "多来源工件输入");
+
+    expect(taskState.status).toBe(TaskStatus.COMPLETED);
+  });
+
+  it("uses explicit artifactInputPhases to read only plan artifacts for build", async () => {
+    const root = await createTempProject();
+    const projectDir = path.join(root, "project");
+    const artifactDir = path.join(root, "artifacts");
+    await mkdir(projectDir, { recursive: true });
+
+    const workflowPhases: WorkflowPhaseConfig[] = [
+      {
+        name: "clarify",
+        hostRole: "clarifier",
+        needApproval: false,
+      },
+      {
+        name: "plan",
+        hostRole: "planner",
+        needApproval: false,
+      },
+      {
+        name: "build",
+        hostRole: "builder",
+        needApproval: false,
+        artifactInputPhases: ["plan"],
+      },
+    ];
+    const projectConfig = createProjectConfig({
+      projectDir,
+      artifactDir,
+      workflow: createWorkflowSelection("feature_change"),
+      workflowPhases,
+    });
+    const artifactManager = new FileArtifactManager(projectConfig);
+    const taskState = createInitialTaskState(
+      "task_single_phase_artifact_input",
+      "single_phase_artifact_input",
+      workflowPhases,
+    );
+    await artifactManager.initializeTask(taskState.taskId);
+    await artifactManager.saveTaskContext({
+      taskId: taskState.taskId,
+      title: taskState.title,
+      description: "单来源工件输入",
+      createdAt: Date.now(),
+      lastRuntimeId: "runtime_single_phase_artifact_input",
+      projectConfig,
+    });
+
+    const controller = new DefaultWorkflowController({
+      taskState,
+      projectConfig,
+      eventEmitter: new EventEmitter(),
+      eventLogger: new MemoryEventLogger(),
+      artifactManager,
+      roleRegistry: new TestRoleRegistry({
+        clarifier: createRole("clarifier", async (input) => {
+          if (input.includes("正式生成 PRD")) {
+            return {
+              summary: "clarify final prd",
+              artifacts: ["# Clarify PRD\n\nsource from clarify"],
+              metadata: {
+                decision: "final_prd_generated",
+              },
+            };
+          }
+
+          return {
+            summary: "clarifier ready-for-prd",
+            artifacts: [],
+            metadata: {
+              decision: "ready_for_prd",
+            },
+          };
+        }),
+        planner: createRole("planner", async (_input, context) => {
+          expect(await context.artifacts.list()).toEqual(["clarify/final-prd"]);
+
+          return {
+            summary: "planner summary",
+            artifacts: ["# Plan\n\nsource from plan"],
+          };
+        }),
+        builder: createRole("builder", async (_input, context) => {
+          expect(await context.artifacts.list()).toEqual(["plan/plan-planner-1"]);
+          expect(await context.artifacts.get("plan/plan-planner-1")).toContain(
+            "source from plan",
+          );
+          expect(await context.artifacts.get("clarify/final-prd")).toBeUndefined();
+
+          return {
+            summary: "builder summary",
+            artifacts: ["# Build\n\nimplemented"],
+          };
+        }),
+      }),
+    });
+
+    await controller.run(taskState.taskId, "单来源工件输入");
+
+    expect(taskState.status).toBe(TaskStatus.COMPLETED);
+  });
+
+  it("falls back to previous phase artifacts when artifactInputPhases is undefined", async () => {
+    const root = await createTempProject();
+    const projectDir = path.join(root, "project");
+    const artifactDir = path.join(root, "artifacts");
+    await mkdir(projectDir, { recursive: true });
+
+    const workflowPhases: WorkflowPhaseConfig[] = [
+      {
+        name: "clarify",
+        hostRole: "clarifier",
+        needApproval: false,
+      },
+      {
+        name: "plan",
+        hostRole: "planner",
+        needApproval: false,
+      },
+      {
+        name: "build",
+        hostRole: "builder",
+        needApproval: false,
+      },
+    ];
+    const projectConfig = createProjectConfig({
+      projectDir,
+      artifactDir,
+      workflow: createWorkflowSelection("feature_change"),
+      workflowPhases,
+    });
+    const artifactManager = new FileArtifactManager(projectConfig);
+    const taskState = createInitialTaskState(
+      "task_default_artifact_input_fallback",
+      "default_artifact_input_fallback",
+      workflowPhases,
+    );
+    await artifactManager.initializeTask(taskState.taskId);
+    await artifactManager.saveTaskContext({
+      taskId: taskState.taskId,
+      title: taskState.title,
+      description: "默认来源回退",
+      createdAt: Date.now(),
+      lastRuntimeId: "runtime_default_artifact_input_fallback",
+      projectConfig,
+    });
+
+    const controller = new DefaultWorkflowController({
+      taskState,
+      projectConfig,
+      eventEmitter: new EventEmitter(),
+      eventLogger: new MemoryEventLogger(),
+      artifactManager,
+      roleRegistry: new TestRoleRegistry({
+        clarifier: createRole("clarifier", async (input) => {
+          if (input.includes("正式生成 PRD")) {
+            return {
+              summary: "clarify final prd",
+              artifacts: ["# Clarify PRD\n\nsource from clarify"],
+              metadata: {
+                decision: "final_prd_generated",
+              },
+            };
+          }
+
+          return {
+            summary: "clarifier ready-for-prd",
+            artifacts: [],
+            metadata: {
+              decision: "ready_for_prd",
+            },
+          };
+        }),
+        planner: createRole("planner", async (_input, context) => {
+          expect(await context.artifacts.list()).toEqual(["clarify/final-prd"]);
+
+          return {
+            summary: "planner summary",
+            artifacts: ["# Plan\n\nsource from plan"],
+          };
+        }),
+        builder: createRole("builder", async (_input, context) => {
+          expect(await context.artifacts.list()).toEqual(["plan/plan-planner-1"]);
+          expect(await context.artifacts.get("plan/plan-planner-1")).toContain(
+            "source from plan",
+          );
+          expect(await context.artifacts.get("clarify/final-prd")).toBeUndefined();
+
+          return {
+            summary: "builder summary",
+            artifacts: ["# Build\n\nimplemented"],
+          };
+        }),
+      }),
+    });
+
+    await controller.run(taskState.taskId, "默认来源回退");
+
+    expect(taskState.status).toBe(TaskStatus.COMPLETED);
+  });
+
+  it("preserves the configured artifactInputPhases order", async () => {
+    const root = await createTempProject();
+    const projectDir = path.join(root, "project");
+    const artifactDir = path.join(root, "artifacts");
+    await mkdir(projectDir, { recursive: true });
+
+    const workflowPhases: WorkflowPhaseConfig[] = [
+      {
+        name: "clarify",
+        hostRole: "clarifier",
+        needApproval: false,
+      },
+      {
+        name: "plan",
+        hostRole: "planner",
+        needApproval: false,
+        artifactInputPhases: ["clarify"],
+      },
+      {
+        name: "build",
+        hostRole: "builder",
+        needApproval: false,
+        artifactInputPhases: ["plan", "clarify"],
+      },
+    ];
+    const projectConfig = createProjectConfig({
+      projectDir,
+      artifactDir,
+      workflow: createWorkflowSelection("feature_change"),
+      workflowPhases,
+    });
+    const artifactManager = new FileArtifactManager(projectConfig);
+    const taskState = createInitialTaskState(
+      "task_artifact_input_order",
+      "artifact_input_order",
+      workflowPhases,
+    );
+    await artifactManager.initializeTask(taskState.taskId);
+    await artifactManager.saveTaskContext({
+      taskId: taskState.taskId,
+      title: taskState.title,
+      description: "来源顺序",
+      createdAt: Date.now(),
+      lastRuntimeId: "runtime_artifact_input_order",
+      projectConfig,
+    });
+
+    const controller = new DefaultWorkflowController({
+      taskState,
+      projectConfig,
+      eventEmitter: new EventEmitter(),
+      eventLogger: new MemoryEventLogger(),
+      artifactManager,
+      roleRegistry: new TestRoleRegistry({
+        clarifier: createRole("clarifier", async (input) => {
+          if (input.includes("正式生成 PRD")) {
+            return {
+              summary: "clarify final prd",
+              artifacts: ["# Clarify PRD\n\nsource from clarify"],
+              metadata: {
+                decision: "final_prd_generated",
+              },
+            };
+          }
+
+          return {
+            summary: "clarifier ready-for-prd",
+            artifacts: [],
+            metadata: {
+              decision: "ready_for_prd",
+            },
+          };
+        }),
+        planner: createRole("planner", async (_input, context) => {
+          expect(await context.artifacts.list()).toEqual(["clarify/final-prd"]);
+
+          return {
+            summary: "planner summary",
+            artifacts: ["# Plan\n\nsource from plan"],
+          };
+        }),
+        builder: createRole("builder", async (_input, context) => {
+          expect(await context.artifacts.list()).toEqual([
+            "plan/plan-planner-1",
+            "clarify/final-prd",
+          ]);
+
+          return {
+            summary: "builder summary",
+            artifacts: ["# Build\n\nimplemented"],
+          };
+        }),
+      }),
+    });
+
+    await controller.run(taskState.taskId, "来源顺序");
+
+    expect(taskState.status).toBe(TaskStatus.COMPLETED);
+  });
+
   it("fails clarify when metadata.decision is missing or invalid", async () => {
     const root = await createTempProject();
     const projectDir = path.join(root, "project");
