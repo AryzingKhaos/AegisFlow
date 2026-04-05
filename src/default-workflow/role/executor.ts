@@ -453,6 +453,7 @@ function extractVisibleMessagesFromCodexEventLine(line: string): string[] {
 function collectVisibleMessages(payload: Record<string, unknown>): string[] {
   const eventType = typeof payload.type === "string" ? payload.type : "";
   const messages: string[] = [];
+  const approvalMessages = collectApprovalRequestMessages(payload);
 
   pushIfPresent(messages, payload.message);
   pushIfPresent(messages, payload.delta);
@@ -464,7 +465,11 @@ function collectVisibleMessages(payload: Record<string, unknown>): string[] {
   collectNestedText(messages, payload.response);
 
   if (messages.length > 0) {
-    return messages;
+    return [...messages, ...approvalMessages];
+  }
+
+  if (approvalMessages.length > 0) {
+    return approvalMessages;
   }
 
   return shouldSuppressJsonEvent(eventType) ? [] : [];
@@ -537,4 +542,150 @@ function shouldSuppressPlainStdoutLine(line: string): boolean {
     line.startsWith("Could not create otel exporter") ||
     /^\d{4}-\d{2}-\d{2}T/.test(line)
   );
+}
+
+function collectApprovalRequestMessages(payload: Record<string, unknown>): string[] {
+  const messages: string[] = [];
+
+  collectApprovalMessagesFromValue(payload, messages, new Set<unknown>());
+
+  return [...new Set(messages)];
+}
+
+function collectApprovalMessagesFromValue(
+  value: unknown,
+  target: string[],
+  seen: Set<unknown>,
+): void {
+  if (!value || typeof value !== "object") {
+    return;
+  }
+
+  if (seen.has(value)) {
+    return;
+  }
+
+  seen.add(value);
+
+  const record = value as Record<string, unknown>;
+  const approvalMessage = formatApprovalRequestMessage(record);
+
+  if (approvalMessage) {
+    target.push(approvalMessage);
+  }
+
+  for (const nestedValue of Object.values(record)) {
+    collectApprovalMessagesFromValue(nestedValue, target, seen);
+  }
+}
+
+function formatApprovalRequestMessage(record: Record<string, unknown>): string | undefined {
+  const toolName = resolveApprovalToolName(record);
+  const parameters = resolveApprovalParameters(record);
+
+  if (!toolName || !parameters) {
+    return undefined;
+  }
+
+  const sandboxPermissions =
+    typeof parameters.sandbox_permissions === "string"
+      ? parameters.sandbox_permissions
+      : undefined;
+  const justification =
+    typeof parameters.justification === "string" ? parameters.justification : undefined;
+  const command = typeof parameters.cmd === "string" ? parameters.cmd : undefined;
+  const path = typeof parameters.path === "string" ? parameters.path : undefined;
+
+  if (sandboxPermissions !== "require_escalated") {
+    return undefined;
+  }
+
+  const lines = [`[审批请求] ${toolName}`];
+
+  if (justification) {
+    lines.push(`说明: ${justification}`);
+  }
+
+  if (command) {
+    lines.push(`命令: ${command}`);
+  }
+
+  if (path) {
+    lines.push(`路径: ${path}`);
+  }
+
+  if (sandboxPermissions) {
+    lines.push(`权限: ${sandboxPermissions}`);
+  }
+
+  const prefixRule = parameters.prefix_rule;
+
+  if (Array.isArray(prefixRule) && prefixRule.every((item) => typeof item === "string")) {
+    lines.push(`复用前缀: ${prefixRule.join(" ")}`);
+  }
+
+  return lines.join("\n");
+}
+
+function resolveApprovalToolName(record: Record<string, unknown>): string | undefined {
+  const directName =
+    typeof record.recipient_name === "string"
+      ? record.recipient_name
+      : typeof record.tool_name === "string"
+        ? record.tool_name
+        : typeof record.name === "string"
+          ? record.name
+          : undefined;
+
+  if (directName) {
+    return directName;
+  }
+
+  const toolCall = record.tool_call;
+
+  if (toolCall && typeof toolCall === "object") {
+    return resolveApprovalToolName(toolCall as Record<string, unknown>);
+  }
+
+  return undefined;
+}
+
+function resolveApprovalParameters(
+  record: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+  const directParameters = pickApprovalParameterRecord(record.parameters);
+
+  if (directParameters) {
+    return directParameters;
+  }
+
+  const directArgs = pickApprovalParameterRecord(record.args);
+
+  if (directArgs) {
+    return directArgs;
+  }
+
+  const directInput = pickApprovalParameterRecord(record.input);
+
+  if (directInput) {
+    return directInput;
+  }
+
+  const toolCall = record.tool_call;
+
+  if (toolCall && typeof toolCall === "object") {
+    return resolveApprovalParameters(toolCall as Record<string, unknown>);
+  }
+
+  return undefined;
+}
+
+function pickApprovalParameterRecord(
+  value: unknown,
+): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+
+  return value as Record<string, unknown>;
 }

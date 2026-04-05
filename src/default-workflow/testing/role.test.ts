@@ -700,6 +700,180 @@ describe("role layer", () => {
     expect(visibleOutputs).toContain("\n```ts\nconst value = 1;\n```\n");
   });
 
+  it("surfaces codex approval requests through visible output", async () => {
+    const root = await createTempProject();
+    const projectDir = path.join(root, "project");
+    await mkdir(projectDir, { recursive: true });
+
+    const visibleOutputs: string[] = [];
+    const executor = new CodexCliRoleAgentExecutor({
+      async runCommand(_file, args, options) {
+        options.onStdoutLine?.(
+          JSON.stringify({
+            type: "response.item.delta",
+            item: {
+              recipient_name: "functions.exec_command",
+              parameters: {
+                cmd: "pnpm build",
+                sandbox_permissions: "require_escalated",
+                justification: "需要执行构建来验证当前改动。",
+                prefix_rule: ["pnpm", "build"],
+              },
+            },
+          }),
+        );
+
+        const outputPath = args[args.indexOf("--output-last-message") + 1];
+        await writeFile(
+          outputPath,
+          JSON.stringify({
+            summary: "builder 完成",
+            artifacts: [],
+          }),
+          "utf8",
+        );
+      },
+    });
+
+    await executeRoleAgent({
+      bootstrap: {
+        executor,
+        prompt: "SYSTEM_PROMPT",
+        promptSources: ["builtin/builder.md"],
+        promptWarnings: [],
+        config: {
+          model: "codex-5.4",
+          baseUrl: "https://api.openai.com/v1",
+          apiKey: "dummy",
+          executionMode: "agent",
+          sources: {
+            model: "default",
+            baseUrl: "default",
+            apiKey: "OPENAI_API_KEY",
+            executionMode: "default",
+          },
+        },
+      },
+      roleName: "builder",
+      executionProfile: createCapabilityProfile("builder"),
+      context: {
+        taskId: "task_streaming_approval_request",
+        phase: "build",
+        cwd: projectDir,
+        projectConfig: createProjectConfig({
+          projectDir,
+          artifactDir: path.join(root, "artifacts"),
+          workflow: createWorkflowSelection("bugfix"),
+        }),
+        roleCapabilityProfile: createCapabilityProfile("builder"),
+        async emitVisibleOutput(output) {
+          visibleOutputs.push(output.message);
+        },
+        artifacts: {
+          async get() {
+            return undefined;
+          },
+          async list() {
+            return [];
+          },
+        },
+      },
+      input: "实现登录修复",
+    });
+
+    expect(visibleOutputs).toContain(
+      [
+        "[审批请求] functions.exec_command",
+        "说明: 需要执行构建来验证当前改动。",
+        "命令: pnpm build",
+        "权限: require_escalated",
+        "复用前缀: pnpm build",
+      ].join("\n"),
+    );
+  });
+
+  it("does not mislabel non-escalated tool calls as approval requests", async () => {
+    const root = await createTempProject();
+    const projectDir = path.join(root, "project");
+    await mkdir(projectDir, { recursive: true });
+
+    const visibleOutputs: string[] = [];
+    const executor = new CodexCliRoleAgentExecutor({
+      async runCommand(_file, args, options) {
+        options.onStdoutLine?.(
+          JSON.stringify({
+            type: "response.item.delta",
+            item: {
+              recipient_name: "functions.exec_command",
+              parameters: {
+                cmd: "pnpm build",
+                sandbox_permissions: "use_default",
+              },
+            },
+          }),
+        );
+
+        const outputPath = args[args.indexOf("--output-last-message") + 1];
+        await writeFile(
+          outputPath,
+          JSON.stringify({
+            summary: "builder 完成",
+            artifacts: [],
+          }),
+          "utf8",
+        );
+      },
+    });
+
+    await executeRoleAgent({
+      bootstrap: {
+        executor,
+        prompt: "SYSTEM_PROMPT",
+        promptSources: ["builtin/builder.md"],
+        promptWarnings: [],
+        config: {
+          model: "codex-5.4",
+          baseUrl: "https://api.openai.com/v1",
+          apiKey: "dummy",
+          executionMode: "agent",
+          sources: {
+            model: "default",
+            baseUrl: "default",
+            apiKey: "OPENAI_API_KEY",
+            executionMode: "default",
+          },
+        },
+      },
+      roleName: "builder",
+      executionProfile: createCapabilityProfile("builder"),
+      context: {
+        taskId: "task_streaming_non_approval_tool_call",
+        phase: "build",
+        cwd: projectDir,
+        projectConfig: createProjectConfig({
+          projectDir,
+          artifactDir: path.join(root, "artifacts"),
+          workflow: createWorkflowSelection("bugfix"),
+        }),
+        roleCapabilityProfile: createCapabilityProfile("builder"),
+        async emitVisibleOutput(output) {
+          visibleOutputs.push(output.message);
+        },
+        artifacts: {
+          async get() {
+            return undefined;
+          },
+          async list() {
+            return [];
+          },
+        },
+      },
+      input: "实现登录修复",
+    });
+
+    expect(visibleOutputs.some((message) => message.includes("[审批请求]"))).toBe(false);
+  });
+
   it("wraps codex cli execution failures with role executor context", async () => {
     const root = await createTempProject();
     const projectDir = path.join(root, "project");

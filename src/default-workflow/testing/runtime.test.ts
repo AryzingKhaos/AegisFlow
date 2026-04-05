@@ -116,11 +116,23 @@ describe("workflow runtime", () => {
       artifactDir,
       "tasks",
       runtimeResult.runtime.taskState.taskId,
+      "runtime",
       "task-state.md",
     );
+    const eventLogPath = path.join(
+      artifactDir,
+      "tasks",
+      runtimeResult.runtime.taskState.taskId,
+      "runtime",
+      "workflow-events.jsonl",
+    );
     const snapshot = await readFile(snapshotPath, "utf8");
+    const eventLog = await readFile(eventLogPath, "utf8");
+    const artifactRootEntries = await readdir(artifactDir);
     expect(snapshot).toContain("status: waiting_approval");
     expect(snapshot).toContain("\"phase\": \"build\"");
+    expect(eventLog).toContain("\"type\":\"task_start\"");
+    expect(artifactRootEntries).not.toContain("workflow-events.jsonl");
   });
 
   it("rebuilds runtime on resume and continues from the next approved phase", async () => {
@@ -171,6 +183,49 @@ describe("workflow runtime", () => {
         .filter((event) => event.type === "phase_start")
         .map((event) => event.metadata?.phase),
     ).toEqual(["build", "review"]);
+  });
+
+  it("does not fall back to legacy task state when the new runtime snapshot is corrupted", async () => {
+    const root = await createTempProject();
+    const projectDir = path.join(root, "project");
+    const artifactDir = path.join(projectDir, ".aegisflow", "artifacts");
+    await mkdir(projectDir, { recursive: true });
+
+    const projectConfig = createProjectConfig({
+      projectDir,
+      artifactDir,
+      workflow: createWorkflowSelection("bugfix"),
+      workflowPhases: createDefaultWorkflowPhases(),
+    });
+    const artifactManager = new FileArtifactManager(projectConfig);
+    const taskState = createInitialTaskState(
+      "task_corrupted_runtime_state",
+      "corrupted_runtime_state",
+      projectConfig.workflowPhases,
+    );
+
+    await artifactManager.initializeTask(taskState.taskId);
+    await writeFile(
+      path.join(artifactDir, "tasks", taskState.taskId, "task-state.json"),
+      JSON.stringify({
+        ...taskState,
+        status: "interrupted",
+      }),
+      "utf8",
+    );
+    await writeFile(
+      path.join(
+        artifactDir,
+        "tasks",
+        taskState.taskId,
+        "runtime",
+        "task-state.json",
+      ),
+      "{broken-json",
+      "utf8",
+    );
+
+    await expect(artifactManager.loadTaskState(taskState.taskId)).rejects.toThrow();
   });
 
   it("loads roles.executor config from aegisproject yaml when building runtime", async () => {
@@ -617,6 +672,7 @@ describe("workflow runtime", () => {
       artifactDir,
       "tasks",
       taskState.taskId,
+      "runtime",
       "task-state.md",
     );
     const snapshot = await readFile(snapshotPath, "utf8");
@@ -1055,6 +1111,7 @@ describe("workflow runtime", () => {
       artifactDir,
       "tasks",
       taskState.taskId,
+      "runtime",
       "task-state.md",
     );
     const snapshot = await readFile(snapshotPath, "utf8");

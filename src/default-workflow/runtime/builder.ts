@@ -1,7 +1,10 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { EventEmitter } from "node:events";
-import { FileArtifactManager } from "../persistence/task-store";
+import {
+  FileArtifactManager,
+  getTaskWorkflowEventsPath,
+} from "../persistence/task-store";
 import { DefaultWorkflowController } from "../workflow/controller";
 import {
   createInitialTaskState,
@@ -76,8 +79,9 @@ export async function buildRuntimeForNewTask(
     roleExecutor,
   });
   const eventEmitter = new EventEmitter();
+  const taskEventLogPath = getTaskWorkflowEventsPath(projectConfig, taskId);
   const eventLogger = new JsonlEventLogger(
-    path.join(projectConfig.artifactDir, "workflow-events.jsonl"),
+    taskEventLogPath,
   );
   const artifactManager = new FileArtifactManager(projectConfig);
   const roleRegistry = new DefaultRoleRegistry({
@@ -154,8 +158,12 @@ export async function buildRuntimeForResume(
     roleExecutor,
   });
   const eventEmitter = new EventEmitter();
+  const taskEventLogPath = getTaskWorkflowEventsPath(
+    projectConfig,
+    input.persistedContext.taskId,
+  );
   const eventLogger = new JsonlEventLogger(
-    path.join(projectConfig.artifactDir, "workflow-events.jsonl"),
+    taskEventLogPath,
   );
   const artifactManager = new FileArtifactManager(projectConfig);
   const roleRegistry = new DefaultRoleRegistry({

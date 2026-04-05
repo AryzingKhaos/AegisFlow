@@ -18,7 +18,21 @@ function getTaskRoot(projectConfig: ProjectConfig, taskId: string): string {
   return path.join(getTasksRoot(projectConfig), taskId);
 }
 
+export function getTaskRuntimeRoot(
+  projectConfig: ProjectConfig,
+  taskId: string,
+): string {
+  return path.join(getTaskRoot(projectConfig, taskId), "runtime");
+}
+
 function getTaskStateJsonPath(
+  projectConfig: ProjectConfig,
+  taskId: string,
+): string {
+  return path.join(getTaskRuntimeRoot(projectConfig, taskId), "task-state.json");
+}
+
+function getLegacyTaskStateJsonPath(
   projectConfig: ProjectConfig,
   taskId: string,
 ): string {
@@ -29,14 +43,28 @@ function getTaskStateMarkdownPath(
   projectConfig: ProjectConfig,
   taskId: string,
 ): string {
-  return path.join(getTaskRoot(projectConfig, taskId), "task-state.md");
+  return path.join(getTaskRuntimeRoot(projectConfig, taskId), "task-state.md");
 }
 
 function getTaskContextPath(
   projectConfig: ProjectConfig,
   taskId: string,
 ): string {
+  return path.join(getTaskRuntimeRoot(projectConfig, taskId), "task-context.json");
+}
+
+function getLegacyTaskContextPath(
+  projectConfig: ProjectConfig,
+  taskId: string,
+): string {
   return path.join(getTaskRoot(projectConfig, taskId), "task-context.json");
+}
+
+export function getTaskWorkflowEventsPath(
+  projectConfig: ProjectConfig,
+  taskId: string,
+): string {
+  return path.join(getTaskRuntimeRoot(projectConfig, taskId), "workflow-events.jsonl");
 }
 
 function getArtifactsRoot(
@@ -51,6 +79,9 @@ export class FileArtifactManager implements ArtifactManager {
 
   public async initializeTask(taskId: string): Promise<void> {
     await fs.mkdir(getTaskRoot(this.projectConfig, taskId), {
+      recursive: true,
+    });
+    await fs.mkdir(getTaskRuntimeRoot(this.projectConfig, taskId), {
       recursive: true,
     });
     await fs.mkdir(getArtifactsRoot(this.projectConfig, taskId), {
@@ -96,12 +127,16 @@ export class FileArtifactManager implements ArtifactManager {
   }
 
   public async loadTaskState(taskId: string): Promise<TaskState> {
-    return readJsonFile<TaskState>(getTaskStateJsonPath(this.projectConfig, taskId));
+    return readJsonFileWithFallback<TaskState>(
+      getTaskStateJsonPath(this.projectConfig, taskId),
+      getLegacyTaskStateJsonPath(this.projectConfig, taskId),
+    );
   }
 
   public async loadTaskContext(taskId: string): Promise<PersistedTaskContext> {
-    return readJsonFile<PersistedTaskContext>(
+    return readJsonFileWithFallback<PersistedTaskContext>(
       getTaskContextPath(this.projectConfig, taskId),
+      getLegacyTaskContextPath(this.projectConfig, taskId),
     );
   }
 
@@ -250,10 +285,33 @@ async function readJsonFile<T>(filePath: string): Promise<T> {
   return JSON.parse(content) as T;
 }
 
+async function readJsonFileWithFallback<T>(
+  primaryPath: string,
+  fallbackPath: string,
+): Promise<T> {
+  try {
+    return await readJsonFile<T>(primaryPath);
+  } catch (error) {
+    if (!isMissingFileError(error)) {
+      throw error;
+    }
+
+    return readJsonFile<T>(fallbackPath);
+  }
+}
+
 async function readUtf8IfExists(filePath: string): Promise<string | undefined> {
   try {
     return await fs.readFile(filePath, "utf8");
   } catch {
     return undefined;
   }
+}
+
+function isMissingFileError(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  return "code" in error && (error as { code?: unknown }).code === "ENOENT";
 }
