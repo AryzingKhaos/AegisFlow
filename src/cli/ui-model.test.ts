@@ -93,7 +93,7 @@ describe("cli ui model", () => {
     expect(viewModel.finalBlocks).toHaveLength(1);
     expect(viewModel.finalBlocks[0]?.title).toBe("系统消息");
     expect(viewModel.finalBlocks[0]?.body).toBe("行一\n行二");
-    expect(viewModel.finalBlocks[0]?.tone).toBe("muted");
+    expect(viewModel.finalBlocks[0]?.tone).toBe("system");
   });
 
   it("preserves cross-stream order between skeleton and final blocks", () => {

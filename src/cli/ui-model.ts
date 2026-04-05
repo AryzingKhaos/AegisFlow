@@ -10,7 +10,7 @@ export interface UiBlock {
   order: number;
   title: string;
   body: string;
-  tone: "accent" | "muted" | "result" | "error";
+  tone: "accent" | "system" | "result" | "error";
 }
 
 export interface CliViewModel {
@@ -76,7 +76,7 @@ export function appendSystemLines(
   const systemBlock = createUiBlock(viewModel, "system", {
     title,
     body: lines.join("\n"),
-    tone: "muted",
+    tone: "system",
   });
 
   return {
@@ -139,7 +139,7 @@ export function applyWorkflowEventToCliViewModel(
     const errorSkeletonBlock = createUiBlock(nextViewModel, "skeleton", {
       title: "错误事件",
       body: normalizeCliText(event.message),
-      tone: "muted",
+      tone: "system",
     });
 
     return {
@@ -157,7 +157,7 @@ export function applyWorkflowEventToCliViewModel(
   const skeletonBlock = createUiBlock(nextViewModel, "skeleton", {
     title: buildSkeletonTitle(event),
     body: normalizeCliText(event.message),
-    tone: "muted",
+    tone: "system",
   });
 
   return {

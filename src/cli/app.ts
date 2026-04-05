@@ -12,6 +12,7 @@ import {
   type CliViewModel,
   type UiBlock,
 } from "./ui-model";
+import { resolveResultToneStyle, THEME } from "./theme";
 
 const React = require("react") as {
   createElement: (...args: unknown[]) => unknown;
@@ -24,7 +25,7 @@ const React = require("react") as {
 const importModule = new Function(
   "specifier",
   "return import(specifier);",
-) as (specifier: string) => Promise<any>;
+) as (specifier: string) => Promise<unknown>;
 
 let Box: unknown;
 let Text: unknown;
@@ -61,21 +62,6 @@ interface InkModuleShape {
 }
 
 const h = React.createElement;
-
-const THEME = {
-  accent: "#7f1d1d",
-  accentSoft: "#b91c1c",
-  text: "#f5f5f4",
-  muted: "#a8a29e",
-  subdued: "#78716c",
-  intermediate: "#9ca3af",
-  skeleton: "#93c5fd",
-  result: "#e7e5e4",
-  error: "#f87171",
-  border: "#450a0a",
-  panel: "#1c1917",
-};
-
 const MAX_VISIBLE_INTERMEDIATE_LINES_IDLE = 3;
 const MAX_VISIBLE_INTERMEDIATE_LINES_RUNNING = 7;
 const SPINNER_FRAMES = ["-", "\\", "|", "/"];
@@ -195,16 +181,9 @@ function IntakeInkApp(): unknown {
           error: viewModel.currentError,
         })
       : null,
-    h(
-      Box,
-      {
-        flexDirection: "column",
-        marginTop: 1,
-      },
-      h(OutputPanel, {
-        viewModel,
-      }),
-    ),
+    h(OutputPanel, {
+      viewModel,
+    }),
     h(InputBar, {
       input,
       viewModel,
@@ -295,7 +274,7 @@ function StatusBar(input: {
     Box,
     {
       borderStyle: "round",
-      borderColor: THEME.accent,
+      borderColor: THEME.chrome.border,
       paddingX: 1,
       paddingY: 0,
       flexDirection: "column",
@@ -308,7 +287,7 @@ function StatusBar(input: {
       h(
         Text,
         {
-          color: THEME.accentSoft,
+          color: THEME.chrome.appAccent,
           bold: true,
         },
         input.viewModel.appTitle,
@@ -316,7 +295,7 @@ function StatusBar(input: {
       h(
         Text,
         {
-          color: input.isBusy ? THEME.accentSoft : THEME.muted,
+          color: input.isBusy ? THEME.status.busy : THEME.status.ready,
         },
         input.isBusy ? "BUSY" : "READY",
       ),
@@ -327,46 +306,11 @@ function StatusBar(input: {
         marginTop: 0,
         flexDirection: "row",
       },
-      h(Text, { color: THEME.text }, `任务：${input.viewModel.sessionTitle}`),
-      h(Text, { color: THEME.subdued }, "  |  "),
-      h(Text, { color: THEME.text }, `阶段：${input.viewModel.currentPhase}`),
-      h(Text, { color: THEME.subdued }, "  |  "),
-      h(Text, { color: THEME.text }, `状态：${input.viewModel.taskStatus}`),
-    ),
-  );
-}
-
-function ContentSection(input: {
-  title: string;
-  borderColor: string;
-  marginTop?: number;
-  children: unknown[];
-}): unknown {
-  return h(
-    Box,
-    {
-      marginTop: input.marginTop ?? 0,
-      borderStyle: "round",
-      borderColor: input.borderColor,
-      flexDirection: "column",
-      paddingX: 1,
-      paddingY: 0,
-    },
-    h(
-      Text,
-      {
-        color: THEME.accentSoft,
-        bold: true,
-      },
-      input.title,
-    ),
-    h(
-      Box,
-      {
-        marginTop: 1,
-        flexDirection: "column",
-      },
-      ...input.children,
+      h(Text, { color: THEME.status.label }, `任务：${input.viewModel.sessionTitle}`),
+      h(Text, { color: THEME.status.separator }, "  |  "),
+      h(Text, { color: THEME.status.label }, `阶段：${input.viewModel.currentPhase}`),
+      h(Text, { color: THEME.status.separator }, "  |  "),
+      h(Text, { color: THEME.status.label }, `状态：${input.viewModel.taskStatus}`),
     ),
   );
 }
@@ -379,7 +323,7 @@ function ErrorPanel(input: {
       Text,
       {
         key: "error-summary",
-        color: THEME.text,
+        color: THEME.text.primary,
         bold: true,
       },
       input.error.summary,
@@ -388,7 +332,7 @@ function ErrorPanel(input: {
       key: "error-reason",
       label: "[失败原因]",
       value: input.error.reason,
-      color: THEME.error,
+      color: THEME.error.body,
       bold: true,
     }),
   ];
@@ -399,7 +343,7 @@ function ErrorPanel(input: {
         key: "error-location",
         label: "[失败位置]",
         value: input.error.location,
-        color: THEME.result,
+        color: THEME.text.secondary,
       }),
     );
   }
@@ -410,14 +354,15 @@ function ErrorPanel(input: {
         key: "error-next-action",
         label: "[下一步建议]",
         value: input.error.nextAction,
-        color: THEME.accentSoft,
+        color: THEME.chrome.appAccentSoft,
       }),
     );
   }
 
   return h(ContentSection, {
     title: "错误说明",
-    borderColor: THEME.error,
+    borderColor: THEME.error.border,
+    titleColor: THEME.error.title,
     marginTop: 1,
     children,
   });
@@ -455,7 +400,9 @@ function OutputPanel(input: { viewModel: CliViewModel }): unknown {
 
   return h(ContentSection, {
     title: "输出",
-    borderColor: THEME.border,
+    borderColor: THEME.chrome.borderMuted,
+    titleColor: THEME.text.secondary,
+    marginTop: 1,
     children:
       entries.length > 0
         ? entries
@@ -464,12 +411,48 @@ function OutputPanel(input: { viewModel: CliViewModel }): unknown {
               Text,
               {
                 key: "empty-output",
-                color: THEME.subdued,
+                color: THEME.text.dim,
               },
               "等待输入。",
             ),
           ],
   });
+}
+
+function ContentSection(input: {
+  title: string;
+  borderColor: string;
+  titleColor?: string;
+  marginTop?: number;
+  children: unknown[];
+}): unknown {
+  return h(
+    Box,
+    {
+      marginTop: input.marginTop ?? 0,
+      borderStyle: "round",
+      borderColor: input.borderColor,
+      flexDirection: "column",
+      paddingX: 1,
+      paddingY: 0,
+    },
+    h(
+      Text,
+      {
+        color: input.titleColor ?? THEME.text.secondary,
+        bold: true,
+      },
+      input.title,
+    ),
+    h(
+      Box,
+      {
+        marginTop: 1,
+        flexDirection: "column",
+      },
+      ...input.children,
+    ),
+  );
 }
 
 function LabeledBlock(input: {
@@ -534,14 +517,16 @@ function buildOutputEntries(
         key: block.id,
         label: kind === "skeleton" ? "[骨架输出]" : "[结果输出]",
         color:
-          kind === "skeleton" ? THEME.skeleton : resolveFinalBlockColor(block.tone),
+          kind === "skeleton"
+            ? THEME.skeleton.event
+            : resolveFinalBlockColor(block.tone),
         value:
           kind === "skeleton"
             ? formatSkeletonBlockValue(block)
             : block.title
               ? `${block.title} [${block.body}]`
               : block.body,
-        bold: kind === "skeleton" ? false : block.tone !== "muted",
+        bold: kind === "skeleton" ? false : block.tone !== "system",
       }),
     ),
     ...(visibleIntermediateLines.length > 0
@@ -549,7 +534,7 @@ function buildOutputEntries(
           h(LabeledBlock, {
             key: "intermediate_group",
             label: intermediateLabel,
-            color: THEME.intermediate,
+            color: THEME.intermediate.line,
             value: hasOmittedIntermediateLines
               ? `${visibleIntermediateLines.join("\n")}\n...`
               : visibleIntermediateLines.join("\n"),
@@ -569,7 +554,7 @@ function InputBar(input: {
     {
       marginTop: 1,
       borderStyle: "round",
-      borderColor: THEME.accent,
+      borderColor: THEME.input.border,
       flexDirection: "column",
       paddingX: 1,
       paddingY: 0,
@@ -577,7 +562,7 @@ function InputBar(input: {
     h(
       Text,
       {
-        color: THEME.accentSoft,
+        color: THEME.input.title,
         bold: true,
       },
       "输入",
@@ -585,45 +570,22 @@ function InputBar(input: {
     h(
       Text,
       {
-        color: THEME.muted,
+        color: THEME.input.hint,
       },
       input.viewModel.inputHint,
     ),
     h(
       Text,
       {
-        color: input.isBusy ? THEME.subdued : THEME.text,
+        color: input.isBusy ? THEME.input.busyValue : THEME.input.value,
       },
-      `> ${input.input}${input.isBusy ? "" : "█"}`,
+      `> ${input.input}${input.isBusy ? "" : "_"}`,
     ),
   );
 }
 
-function resolveToneColor(tone: UiBlock["tone"]): string {
-  switch (tone) {
-    case "accent":
-      return THEME.accentSoft;
-    case "result":
-      return THEME.result;
-    case "error":
-      return THEME.error;
-    case "muted":
-      return THEME.muted;
-    default:
-      return THEME.text;
-  }
-}
-
 function resolveFinalBlockColor(tone: UiBlock["tone"]): string {
-  if (tone === "error") {
-    return THEME.error;
-  }
-
-  if (tone === "accent") {
-    return THEME.accentSoft;
-  }
-
-  return THEME.result;
+  return resolveResultToneStyle(tone).body;
 }
 
 function formatSkeletonBlockValue(block: UiBlock): string {
