@@ -12,6 +12,11 @@ import {
   type CliViewModel,
   type UiBlock,
 } from "./ui-model";
+import {
+  buildOutputRegionLayout,
+  normalizeDisplayNewlines,
+  type OutputRegionLayout,
+} from "./output-layout";
 import { resolveResultToneStyle, THEME } from "./theme";
 
 const React = require("react") as {
@@ -388,11 +393,10 @@ function OutputPanel(input: { viewModel: CliViewModel }): unknown {
   }, [isRunning]);
 
   const intermediateLabel = isRunning
-    ? `${SPINNER_FRAMES[spinnerIndex]} [过程输出]`
-    : "[过程输出]";
-  const entries = buildOutputEntries(
+    ? `${SPINNER_FRAMES[spinnerIndex]} 过程输出`
+    : "过程输出";
+  const regions = buildOutputRegionLayout(
     input.viewModel,
-    intermediateLabel,
     isRunning
       ? MAX_VISIBLE_INTERMEDIATE_LINES_RUNNING
       : MAX_VISIBLE_INTERMEDIATE_LINES_IDLE,
@@ -404,8 +408,14 @@ function OutputPanel(input: { viewModel: CliViewModel }): unknown {
     titleColor: THEME.text.secondary,
     marginTop: 1,
     children:
-      entries.length > 0
-        ? entries
+      regions.length > 0
+        ? regions.map((region, index) =>
+            renderOutputRegion(region, {
+              key: `${region.kind}_region`,
+              marginTop: index === 0 ? 0 : 1,
+              intermediateTitle: intermediateLabel,
+            }),
+          )
         : [
             h(
               Text,
@@ -417,6 +427,38 @@ function OutputPanel(input: { viewModel: CliViewModel }): unknown {
             ),
           ],
   });
+}
+
+function renderOutputRegion(
+  region: OutputRegionLayout,
+  input: {
+    key: string;
+    marginTop: number;
+    intermediateTitle: string;
+  },
+): unknown {
+  switch (region.kind) {
+    case "result":
+      return h(ResultRegion, {
+        key: input.key,
+        blocks: region.blocks,
+        marginTop: input.marginTop,
+      });
+    case "skeleton":
+      return h(SkeletonRegion, {
+        key: input.key,
+        blocks: region.blocks,
+        marginTop: input.marginTop,
+      });
+    case "intermediate":
+      return h(IntermediateRegion, {
+        key: input.key,
+        title: input.intermediateTitle,
+        lines: region.lines,
+        hasOmittedLines: region.hasOmittedLines,
+        marginTop: input.marginTop,
+      });
+  }
 }
 
 function ContentSection(input: {
@@ -455,6 +497,157 @@ function ContentSection(input: {
   );
 }
 
+function ResultRegion(input: {
+  blocks: UiBlock[];
+  marginTop: number;
+}): unknown {
+  return h(ContentSection, {
+    title: "结果输出",
+    borderColor: THEME.result.border,
+    titleColor: THEME.result.title,
+    marginTop: input.marginTop,
+    children: input.blocks.map((block, index) =>
+      h(ResultBlock, {
+        key: block.id,
+        block,
+        isLast: index === input.blocks.length - 1,
+      }),
+    ),
+  });
+}
+
+function ResultBlock(input: {
+  block: UiBlock;
+  isLast: boolean;
+}): unknown {
+  const toneStyle = resolveResultToneStyle(input.block.tone);
+  const bodyLines = normalizeDisplayNewlines(input.block.body).split("\n");
+
+  return h(
+    Box,
+    {
+      marginBottom: input.isLast ? 0 : 1,
+      borderStyle: "round",
+      borderColor: toneStyle.border,
+      flexDirection: "column",
+      paddingX: 1,
+      paddingY: 0,
+    },
+    input.block.title
+      ? h(
+          Text,
+          {
+            color: toneStyle.title,
+            bold: input.block.tone !== "system",
+          },
+          input.block.title,
+        )
+      : null,
+    ...bodyLines.map((line, index) =>
+      h(
+        Text,
+        {
+          key: `${input.block.id}_body_${String(index)}`,
+          color: toneStyle.body,
+          dimColor: input.block.tone === "system",
+        },
+        line,
+      ),
+    ),
+  );
+}
+
+function SkeletonRegion(input: {
+  blocks: UiBlock[];
+  marginTop: number;
+}): unknown {
+  return h(ContentSection, {
+    title: "骨架输出",
+    borderColor: THEME.skeleton.border,
+    titleColor: THEME.skeleton.title,
+    marginTop: input.marginTop,
+    children: input.blocks.map((block, index) =>
+      h(SkeletonBlock, {
+        key: block.id,
+        block,
+        isLast: index === input.blocks.length - 1,
+      }),
+    ),
+  });
+}
+
+function SkeletonBlock(input: {
+  block: UiBlock;
+  isLast: boolean;
+}): unknown {
+  const body = formatSkeletonBodyForDisplay(input.block.body);
+
+  return h(
+    Box,
+    {
+      marginBottom: input.isLast ? 0 : 1,
+      flexDirection: "column",
+    },
+    input.block.title
+      ? h(
+          Text,
+          {
+            color: THEME.skeleton.event,
+            bold: true,
+          },
+          input.block.title,
+        )
+      : null,
+    body
+      ? h(
+          Text,
+          {
+            color: THEME.skeleton.detail,
+          },
+          body,
+        )
+      : null,
+  );
+}
+
+function IntermediateRegion(input: {
+  title: string;
+  lines: string[];
+  hasOmittedLines: boolean;
+  marginTop: number;
+}): unknown {
+  return h(ContentSection, {
+    title: input.title,
+    borderColor: THEME.intermediate.border,
+    titleColor: THEME.intermediate.title,
+    marginTop: input.marginTop,
+    children: [
+      ...input.lines.map((line, index) =>
+        h(
+          Text,
+          {
+            key: `intermediate_line_${String(index)}`,
+            color: THEME.intermediate.line,
+          },
+          line,
+        ),
+      ),
+      ...(input.hasOmittedLines
+        ? [
+            h(
+              Text,
+              {
+                key: "intermediate_ellipsis",
+                color: THEME.intermediate.empty,
+              },
+              "...",
+            ),
+          ]
+        : []),
+    ],
+  });
+}
+
 function LabeledBlock(input: {
   label: string;
   value: string;
@@ -484,64 +677,6 @@ function LabeledBlock(input: {
       ),
     ),
   );
-}
-
-function buildOutputEntries(
-  viewModel: CliViewModel,
-  intermediateLabel: string,
-  maxVisibleIntermediateLines: number,
-): unknown[] {
-  const orderedBlocks = [
-    ...viewModel.finalBlocks.map((block) => ({
-      kind: "final" as const,
-      block,
-    })),
-    ...viewModel.skeletonBlocks.map((block) => ({
-      kind: "skeleton" as const,
-      block,
-    })),
-  ].sort((left, right) => left.block.order - right.block.order);
-  const flattenedIntermediateLines = viewModel.intermediateLines.flatMap((line) =>
-    normalizeDisplayNewlines(line).split("\n"),
-  );
-  const visibleIntermediateLines = flattenedIntermediateLines.slice(
-    0,
-    maxVisibleIntermediateLines,
-  );
-  const hasOmittedIntermediateLines =
-    flattenedIntermediateLines.length > maxVisibleIntermediateLines;
-
-  return [
-    ...orderedBlocks.map(({ kind, block }) =>
-      h(LabeledBlock, {
-        key: block.id,
-        label: kind === "skeleton" ? "[骨架输出]" : "[结果输出]",
-        color:
-          kind === "skeleton"
-            ? THEME.skeleton.event
-            : resolveFinalBlockColor(block.tone),
-        value:
-          kind === "skeleton"
-            ? formatSkeletonBlockValue(block)
-            : block.title
-              ? `${block.title} [${block.body}]`
-              : block.body,
-        bold: kind === "skeleton" ? false : block.tone !== "system",
-      }),
-    ),
-    ...(visibleIntermediateLines.length > 0
-      ? [
-          h(LabeledBlock, {
-            key: "intermediate_group",
-            label: intermediateLabel,
-            color: THEME.intermediate.line,
-            value: hasOmittedIntermediateLines
-              ? `${visibleIntermediateLines.join("\n")}\n...`
-              : visibleIntermediateLines.join("\n"),
-          }),
-        ]
-      : []),
-  ];
 }
 
 function InputBar(input: {
@@ -584,24 +719,6 @@ function InputBar(input: {
   );
 }
 
-function resolveFinalBlockColor(tone: UiBlock["tone"]): string {
-  return resolveResultToneStyle(tone).body;
-}
-
-function formatSkeletonBlockValue(block: UiBlock): string {
-  const body = formatSkeletonBodyForDisplay(block.body);
-
-  if (!block.title) {
-    return body;
-  }
-
-  if (!body) {
-    return block.title;
-  }
-
-  return `${block.title}\n${body}`;
-}
-
 function formatSkeletonBodyForDisplay(body: string): string {
   return normalizeDisplayNewlines(body)
     .replace(/，(?=(当前|目标|工件|状态|阶段|角色|结果|原因|恢复点))/g, "，\n")
@@ -610,8 +727,4 @@ function formatSkeletonBodyForDisplay(body: string): string {
       /,(?=\s*(currentPhase|status|phaseStatus|resumeFrom|artifactPath|roleName|phase)\b)/g,
       ",\n",
     );
-}
-
-function normalizeDisplayNewlines(value: string): string {
-  return value.replace(/\\r\\n/g, "\n").replace(/\\n/g, "\n");
 }

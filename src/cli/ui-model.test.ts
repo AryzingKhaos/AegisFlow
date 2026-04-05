@@ -96,7 +96,7 @@ describe("cli ui model", () => {
     expect(viewModel.finalBlocks[0]?.tone).toBe("system");
   });
 
-  it("preserves cross-stream order between skeleton and final blocks", () => {
+  it("keeps interleaved skeleton and final events in separate streams", () => {
     let viewModel = createInitialCliViewModel([]);
 
     viewModel = applyWorkflowEventToCliViewModel(
@@ -120,12 +120,14 @@ describe("cli ui model", () => {
       }),
     );
 
-    expect(viewModel.skeletonBlocks[0]?.order).toBeLessThan(
-      viewModel.finalBlocks[0]?.order ?? Number.POSITIVE_INFINITY,
-    );
-    expect(viewModel.finalBlocks[0]?.order).toBeLessThan(
-      viewModel.skeletonBlocks[1]?.order ?? Number.POSITIVE_INFINITY,
-    );
+    expect(viewModel.skeletonBlocks.map((block) => block.title)).toEqual([
+      "阶段开始",
+      "阶段结束",
+    ]);
+    expect(viewModel.finalBlocks.map((block) => block.title)).toEqual([
+      "clarifier @ clarify · summary",
+    ]);
+    expect(viewModel.intermediateLines).toEqual([]);
   });
 
   it("maps runtime error events into a structured current error view", () => {

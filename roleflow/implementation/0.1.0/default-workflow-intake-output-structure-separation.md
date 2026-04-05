@@ -143,14 +143,14 @@ flowchart TD
 
 ## Todolist (todoList)
 
-- [ ] 盘点 `src/cli/app.ts` 中当前单面板混排入口，明确 `OutputPanel`、`buildOutputEntries(...)`、`LabeledBlock` 在三区域混排中的职责。
-- [ ] 将当前输出层从单一 `ContentSection(title: "输出")` 收敛为“外层壳层 + 结果区 / 骨架区 / 过程输出区”三个独立子区域。
-- [ ] 为结果区补回独立构建逻辑，确保 `finalBlocks` 不再通过 `[结果输出]` 标签混入统一列表。
-- [ ] 为骨架区补回独立构建逻辑，确保 `skeletonBlocks` 只在骨架辅助区内渲染，不再进入结果流。
-- [ ] 为过程输出区补回独立构建逻辑，确保 `intermediateLines` 只在最低优先级区域内渲染，不再拼接到统一输出面板末尾。
-- [ ] 删除或重构 `buildOutputEntries(...)` 这类跨区域扁平收口函数，避免后续 merge 再次以统一数组形式合并三区域。
-- [ ] 收敛 `UiBlock.order` 的使用边界，只保留各自区域内部顺序语义，不再驱动跨区域排序。
-- [ ] 设计并实现按内容显隐的空状态策略，保证无内容时可隐藏区域，但三区域结构能力仍保留。
-- [ ] 更新 `src/cli/ui-model.test.ts`，移除或改写鼓励跨流混排的断言，补上三区域分离和固定区域优先级的测试。
-- [ ] 新增或补充结构级测试/等价校验，覆盖“token 已存在但结构未分离”这一回归场景。
-- [ ] 完成自检，确认本次改造只影响 Intake 输出层组织方式，没有越权改动 Workflow 状态机、CliViewModel 事件来源协议或非 Intake 页面。
+- [x] 盘点 `src/cli/app.ts` 中当前单面板混排入口，明确 `OutputPanel`、`buildOutputEntries(...)`、`LabeledBlock` 在三区域混排中的职责。
+- [x] 将当前输出层从单一 `ContentSection(title: "输出")` 收敛为“外层壳层 + 结果区 / 骨架区 / 过程输出区”三个独立子区域。
+- [x] 为结果区补回独立构建逻辑，确保 `finalBlocks` 不再通过 `[结果输出]` 标签混入统一列表。
+- [x] 为骨架区补回独立构建逻辑，确保 `skeletonBlocks` 只在骨架辅助区内渲染，不再进入结果流。
+- [x] 为过程输出区补回独立构建逻辑，确保 `intermediateLines` 只在最低优先级区域内渲染，不再拼接到统一输出面板末尾。
+- [x] 删除或重构 `buildOutputEntries(...)` 这类跨区域扁平收口函数，避免后续 merge 再次以统一数组形式合并三区域。
+- [x] 收敛 `UiBlock.order` 的使用边界，只保留各自区域内部顺序语义，不再驱动跨区域排序。
+- [x] 设计并实现按内容显隐的空状态策略，保证无内容时可隐藏区域，但三区域结构能力仍保留。
+- [x] 更新 `src/cli/ui-model.test.ts`，移除或改写鼓励跨流混排的断言，补上三区域分离和固定区域优先级的测试。
+- [x] 新增或补充结构级测试/等价校验，覆盖“token 已存在但结构未分离”这一回归场景。
+- [x] 完成自检，确认本次改造只影响 Intake 输出层组织方式，没有越权改动 Workflow 状态机、CliViewModel 事件来源协议或非 Intake 页面。
