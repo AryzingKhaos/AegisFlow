@@ -9,6 +9,11 @@ import {
   type CliViewModel,
   type UiBlock,
 } from "./ui-model";
+import {
+  compactSkeletonBody,
+  resolveResultToneStyle,
+  THEME,
+} from "./theme";
 
 const React = require("react") as {
   createElement: (...args: unknown[]) => unknown;
@@ -58,18 +63,6 @@ interface InkModuleShape {
 }
 
 const h = React.createElement;
-
-const THEME = {
-  accent: "#7f1d1d",
-  accentSoft: "#b91c1c",
-  text: "#f5f5f4",
-  muted: "#a8a29e",
-  subdued: "#78716c",
-  intermediate: "#9ca3af",
-  error: "#f87171",
-  border: "#450a0a",
-  panel: "#1c1917",
-};
 
 export async function runCliApp(): Promise<unknown> {
   if (!renderApp) {
@@ -182,51 +175,11 @@ function IntakeInkApp(): unknown {
         flexDirection: "column",
         marginTop: 1,
       },
-      h(ContentSection, {
-        title: "结果与事件",
-        borderColor: THEME.border,
-        children: [
-          viewModel.finalBlocks.length > 0
-            ? viewModel.finalBlocks.map((block) =>
-                h(ResultBlock, {
-                  key: block.id,
-                  block,
-                }),
-              )
-            : [
-                h(
-                  Text,
-                  {
-                    key: "empty-results",
-                    color: THEME.subdued,
-                  },
-                  "等待输入。",
-                ),
-              ],
-        ].flat(),
+      h(PrimaryResultArea, {
+        blocks: viewModel.finalBlocks,
       }),
-      h(ContentSection, {
-        title: "骨架事件",
-        borderColor: THEME.border,
-        marginTop: 1,
-        children:
-          viewModel.skeletonBlocks.length > 0
-            ? viewModel.skeletonBlocks.map((block) =>
-                h(SkeletonBlock, {
-                  key: block.id,
-                  block,
-                }),
-              )
-            : [
-                h(
-                  Text,
-                  {
-                    key: "empty-skeleton",
-                    color: THEME.subdued,
-                  },
-                  "暂无骨架事件。",
-                ),
-              ],
+      h(SkeletonArea, {
+        blocks: viewModel.skeletonBlocks,
       }),
       h(IntermediateOutputPanel, {
         lines: viewModel.intermediateLines,
@@ -297,7 +250,7 @@ function StatusBar(input: {
     Box,
     {
       borderStyle: "round",
-      borderColor: THEME.accent,
+      borderColor: THEME.chrome.border,
       paddingX: 1,
       paddingY: 0,
       flexDirection: "column",
@@ -310,7 +263,7 @@ function StatusBar(input: {
       h(
         Text,
         {
-          color: THEME.accentSoft,
+          color: THEME.chrome.appAccent,
           bold: true,
         },
         input.viewModel.appTitle,
@@ -318,7 +271,7 @@ function StatusBar(input: {
       h(
         Text,
         {
-          color: input.isBusy ? THEME.accentSoft : THEME.muted,
+          color: input.isBusy ? THEME.status.busy : THEME.status.ready,
         },
         input.isBusy ? "BUSY" : "READY",
       ),
@@ -329,27 +282,23 @@ function StatusBar(input: {
         marginTop: 0,
         flexDirection: "row",
       },
-      h(Text, { color: THEME.text }, `任务：${input.viewModel.sessionTitle}`),
-      h(Text, { color: THEME.subdued }, "  |  "),
-      h(Text, { color: THEME.text }, `阶段：${input.viewModel.currentPhase}`),
-      h(Text, { color: THEME.subdued }, "  |  "),
-      h(Text, { color: THEME.text }, `状态：${input.viewModel.taskStatus}`),
+      h(Text, { color: THEME.status.label }, `任务：${input.viewModel.sessionTitle}`),
+      h(Text, { color: THEME.status.separator }, "  |  "),
+      h(Text, { color: THEME.status.label }, `阶段：${input.viewModel.currentPhase}`),
+      h(Text, { color: THEME.status.separator }, "  |  "),
+      h(Text, { color: THEME.status.label }, `状态：${input.viewModel.taskStatus}`),
     ),
   );
 }
 
-function ContentSection(input: {
-  title: string;
-  borderColor: string;
-  marginTop?: number;
-  children: unknown[];
+function PrimaryResultArea(input: {
+  blocks: UiBlock[];
 }): unknown {
   return h(
     Box,
     {
-      marginTop: input.marginTop ?? 0,
       borderStyle: "round",
-      borderColor: input.borderColor,
+      borderColor: THEME.result.border,
       flexDirection: "column",
       paddingX: 1,
       paddingY: 0,
@@ -357,10 +306,10 @@ function ContentSection(input: {
     h(
       Text,
       {
-        color: THEME.accentSoft,
+        color: THEME.result.title,
         bold: true,
       },
-      input.title,
+      "主结果",
     ),
     h(
       Box,
@@ -368,32 +317,123 @@ function ContentSection(input: {
         marginTop: 1,
         flexDirection: "column",
       },
-      ...input.children,
+      ...(input.blocks.length > 0
+        ? input.blocks.map((block, index) =>
+            h(ResultBlock, {
+              key: block.id,
+              block,
+              isLast: index === input.blocks.length - 1,
+            }),
+          )
+        : [
+            h(
+              Text,
+              {
+                key: "empty-results",
+                color: THEME.text.dim,
+              },
+              "等待输入，主结果会优先显示在这里。",
+            ),
+          ]),
     ),
   );
 }
 
-function ResultBlock(input: { block: UiBlock }): unknown {
+function ResultBlock(input: {
+  block: UiBlock;
+  isLast: boolean;
+}): unknown {
+  const toneStyle = resolveResultToneStyle(input.block.tone);
+
   return h(
     Box,
     {
-      marginBottom: 1,
+      marginBottom: input.isLast ? 0 : 1,
       flexDirection: "column",
+      borderStyle: "round",
+      borderColor: toneStyle.border,
+      paddingX: 1,
+      paddingY: 0,
+    },
+    h(
+      Box,
+      {
+        flexDirection: "column",
+      },
+      h(
+        Text,
+        {
+          color: toneStyle.eyebrow,
+        },
+        input.block.tone === "error" ? "ERROR" : input.block.tone === "system" ? "SYSTEM" : "RESULT",
+      ),
+      h(
+        Text,
+        {
+          color: toneStyle.title,
+          bold: true,
+        },
+        input.block.title,
+      ),
+    ),
+    h(
+      Box,
+      {
+        marginTop: 1,
+      },
+      h(
+        Text,
+        {
+          color: toneStyle.body,
+        },
+        input.block.body,
+      ),
+    ),
+  );
+}
+
+function SkeletonArea(input: { blocks: UiBlock[] }): unknown {
+  return h(
+    Box,
+    {
+      marginTop: 1,
+      borderStyle: "single",
+      borderColor: THEME.skeleton.border,
+      flexDirection: "column",
+      paddingX: 1,
+      paddingY: 0,
     },
     h(
       Text,
       {
-        color: resolveToneColor(input.block.tone),
-        bold: input.block.tone !== "muted",
+        color: THEME.skeleton.title,
+        bold: true,
       },
-      input.block.title,
+      "流程骨架",
     ),
     h(
-      Text,
+      Box,
       {
-        color: THEME.text,
+        marginTop: 1,
+        flexDirection: "column",
       },
-      input.block.body,
+      ...(input.blocks.length > 0
+        ? input.blocks.map((block) =>
+            h(SkeletonBlock, {
+              key: block.id,
+              block,
+            }),
+          )
+        : [
+            h(
+              Text,
+              {
+                key: "empty-skeleton",
+                color: THEME.skeleton.detail,
+              },
+              "暂无骨架事件。",
+            ),
+          ]),
     ),
   );
 }
@@ -403,14 +443,21 @@ function SkeletonBlock(input: { block: UiBlock }): unknown {
     Box,
     {
       marginBottom: 1,
-      flexDirection: "column",
+      flexDirection: "row",
     },
     h(
       Text,
       {
-        color: THEME.subdued,
+        color: THEME.skeleton.title,
       },
-      `${input.block.title} · ${input.block.body}`,
+      `${input.block.title}: `,
+    ),
+    h(
+      Text,
+      {
+        color: THEME.skeleton.event,
+      },
+      compactSkeletonBody(input.block.body),
     ),
   );
 }
@@ -421,7 +468,7 @@ function IntermediateOutputPanel(input: { lines: string[] }): unknown {
     {
       marginTop: 1,
       borderStyle: "round",
-      borderColor: THEME.border,
+      borderColor: THEME.intermediate.border,
       flexDirection: "column",
       paddingX: 1,
       paddingY: 0,
@@ -429,8 +476,7 @@ function IntermediateOutputPanel(input: { lines: string[] }): unknown {
     h(
       Text,
       {
-        color: THEME.accentSoft,
-        bold: true,
+        color: THEME.intermediate.title,
       },
       "过程输出",
     ),
@@ -446,7 +492,7 @@ function IntermediateOutputPanel(input: { lines: string[] }): unknown {
               Text,
               {
                 key: `intermediate_${String(index)}`,
-                color: THEME.intermediate,
+                color: THEME.intermediate.line,
               },
               line,
             ),
@@ -456,7 +502,7 @@ function IntermediateOutputPanel(input: { lines: string[] }): unknown {
               Text,
               {
                 key: "empty-intermediate",
-                color: THEME.subdued,
+                color: THEME.intermediate.empty,
               },
               "暂无中间输出。",
             ),
@@ -475,7 +521,7 @@ function InputBar(input: {
     {
       marginTop: 1,
       borderStyle: "round",
-      borderColor: THEME.accent,
+      borderColor: THEME.input.border,
       flexDirection: "column",
       paddingX: 1,
       paddingY: 0,
@@ -483,7 +529,7 @@ function InputBar(input: {
     h(
       Text,
       {
-        color: THEME.accentSoft,
+        color: THEME.input.title,
         bold: true,
       },
       "输入",
@@ -491,29 +537,16 @@ function InputBar(input: {
     h(
       Text,
       {
-        color: THEME.muted,
+        color: THEME.input.hint,
       },
       input.viewModel.inputHint,
     ),
     h(
       Text,
       {
-        color: input.isBusy ? THEME.subdued : THEME.text,
+        color: input.isBusy ? THEME.input.busyValue : THEME.input.value,
       },
-      `> ${input.input}${input.isBusy ? "" : "█"}`,
+      `> ${input.input}${input.isBusy ? "" : "_"}`,
     ),
   );
-}
-
-function resolveToneColor(tone: UiBlock["tone"]): string {
-  switch (tone) {
-    case "accent":
-      return THEME.accentSoft;
-    case "error":
-      return THEME.error;
-    case "muted":
-      return THEME.muted;
-    default:
-      return THEME.text;
-  }
 }

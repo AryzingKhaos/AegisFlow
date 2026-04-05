@@ -5,7 +5,7 @@ export interface UiBlock {
   id: string;
   title: string;
   body: string;
-  tone: "accent" | "muted" | "result" | "error";
+  tone: "accent" | "system" | "result" | "error";
 }
 
 export interface CliViewModel {
@@ -71,7 +71,7 @@ export function appendSystemLines(
         id: createUiBlockId("system"),
         title,
         body: lines.join("\n"),
-        tone: "muted",
+        tone: "system",
       },
     ],
   };
@@ -116,7 +116,7 @@ export function applyWorkflowEventToCliViewModel(
           id: createUiBlockId("skeleton"),
           title: "错误事件",
           body: normalizeCliText(event.message),
-          tone: "muted",
+          tone: "system",
         },
         resolvedOptions.maxSkeletonBlocks,
       ),
@@ -131,7 +131,7 @@ export function applyWorkflowEventToCliViewModel(
         id: createUiBlockId("skeleton"),
         title: buildSkeletonTitle(event),
         body: normalizeCliText(event.message),
-        tone: "muted",
+        tone: "system",
       },
       resolvedOptions.maxSkeletonBlocks,
     ),
