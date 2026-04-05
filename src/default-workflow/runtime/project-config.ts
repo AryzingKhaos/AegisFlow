@@ -19,11 +19,23 @@ export type ProjectRoleExecutorOverride = {
 interface MutableWorkflowDefinition {
   name?: string;
   description?: string;
-  phases: Array<Partial<WorkflowPhaseConfig>>;
+  phases: MutableWorkflowPhase[];
 }
 
-const VALID_PHASE_NAMES = new Set(Object.keys(DEFAULT_PHASE_ROLE_MAPPING));
-const VALID_ROLE_NAMES = new Set(Object.values(DEFAULT_PHASE_ROLE_MAPPING));
+interface MutableWorkflowPhase {
+  name?: string;
+  hostRole?: string;
+  needApproval?: boolean;
+  pauseForInput?: boolean;
+  artifactInputPhases?: unknown;
+}
+
+const VALID_PHASE_NAMES = new Set<WorkflowPhaseConfig["name"]>(
+  Object.keys(DEFAULT_PHASE_ROLE_MAPPING) as WorkflowPhaseConfig["name"][],
+);
+const VALID_ROLE_NAMES = new Set<WorkflowPhaseConfig["hostRole"]>(
+  Object.values(DEFAULT_PHASE_ROLE_MAPPING),
+);
 
 export async function loadProjectWorkflowCatalog(
   projectDir: string,
@@ -70,13 +82,15 @@ function parseProjectWorkflowCatalog(
   let inPhasesBlock = false;
   let sawSingularWorkflowBlock = false;
   let currentWorkflow: MutableWorkflowDefinition | undefined;
-  let currentPhase: Partial<WorkflowPhaseConfig> | undefined;
+  let currentPhase: MutableWorkflowPhase | undefined;
+  let activePhaseListField: "artifactInputPhases" | undefined;
 
   const finalizePhase = (): void => {
     if (!currentWorkflow || !currentPhase) {
       return;
     }
 
+    activePhaseListField = undefined;
     currentWorkflow.phases.push(currentPhase);
     currentPhase = undefined;
   };
@@ -105,6 +119,7 @@ function parseProjectWorkflowCatalog(
       finalizeWorkflow();
       inWorkflowsBlock = trimmedLine === "workflows:";
       sawSingularWorkflowBlock ||= trimmedLine === "workflow:";
+      activePhaseListField = undefined;
       continue;
     }
 
@@ -114,6 +129,7 @@ function parseProjectWorkflowCatalog(
 
     if (indent === 2) {
       finalizeWorkflow();
+      activePhaseListField = undefined;
 
       if (!trimmedLine.startsWith("-")) {
         continue;
@@ -143,6 +159,7 @@ function parseProjectWorkflowCatalog(
     if (indent === 4) {
       finalizePhase();
       inPhasesBlock = trimmedLine === "phases:";
+      activePhaseListField = undefined;
 
       if (!inPhasesBlock) {
         const keyValue = splitYamlKeyValue(trimmedLine);
@@ -157,6 +174,7 @@ function parseProjectWorkflowCatalog(
 
     if (inPhasesBlock && indent === 6) {
       finalizePhase();
+      activePhaseListField = undefined;
 
       if (!trimmedLine.startsWith("-")) {
         continue;
@@ -177,11 +195,37 @@ function parseProjectWorkflowCatalog(
     }
 
     if (inPhasesBlock && indent === 8 && currentPhase) {
+      activePhaseListField = undefined;
       const keyValue = splitYamlKeyValue(trimmedLine);
 
       if (keyValue) {
         assignPhaseField(currentPhase, keyValue.key, keyValue.value);
+
+        if (
+          keyValue.key === "artifactInputPhases" &&
+          keyValue.value.replace(/\s+#.*$/u, "").trim().length === 0
+        ) {
+          currentPhase.artifactInputPhases = [];
+          activePhaseListField = "artifactInputPhases";
+        }
       }
+    }
+
+    if (
+      inPhasesBlock &&
+      indent === 10 &&
+      currentPhase &&
+      activePhaseListField === "artifactInputPhases" &&
+      trimmedLine.startsWith("-")
+    ) {
+      const itemValue = parseYamlScalar(trimmedLine.slice(1).trim());
+
+      if (!Array.isArray(currentPhase.artifactInputPhases)) {
+        currentPhase.artifactInputPhases = [];
+      }
+
+      (currentPhase.artifactInputPhases as unknown[]).push(itemValue);
+      continue;
     }
   }
 
@@ -245,31 +289,65 @@ function validateWorkflowDefinition(
   }
 
   const phaseNames = new Set<WorkflowPhaseConfig["name"]>();
+  const phases = workflow.phases.map((phase, phaseIndex) =>
+    validateWorkflowPhase(name, phase, phaseIndex, configPath, phaseNames),
+  );
+  const phaseNameSet = new Set(phases.map((phase) => phase.name));
+
+  for (const [phaseIndex, phase] of phases.entries()) {
+    const artifactInputPhases = phase.artifactInputPhases ?? [];
+    const upstreamPhases = new Set(
+      phases.slice(0, phaseIndex).map((item) => item.name),
+    );
+
+    for (const inputPhase of artifactInputPhases) {
+      if (!phaseNameSet.has(inputPhase)) {
+        throw createWorkflowConfigError(
+          configPath,
+          `workflow ${name} 的 phases[${phaseIndex}].artifactInputPhases 引用了未定义阶段：${inputPhase}。`,
+        );
+      }
+
+      if (!upstreamPhases.has(inputPhase)) {
+        throw createWorkflowConfigError(
+          configPath,
+          `workflow ${name} 的 phases[${phaseIndex}].artifactInputPhases 只能引用当前阶段之前的上游阶段：${inputPhase}。`,
+        );
+      }
+    }
+  }
 
   return {
     name,
     description,
-    phases: workflow.phases.map((phase, phaseIndex) =>
-      validateWorkflowPhase(name, phase, phaseIndex, configPath, phaseNames),
-    ),
+    phases,
   };
 }
 
 function validateWorkflowPhase(
   workflowName: string,
-  phase: Partial<WorkflowPhaseConfig>,
+  phase: MutableWorkflowPhase,
   phaseIndex: number,
   configPath: string,
   phaseNames: Set<WorkflowPhaseConfig["name"]>,
 ): WorkflowPhaseConfig {
-  if (!phase.name || !VALID_PHASE_NAMES.has(phase.name)) {
+  const rawPhaseName = phase.name;
+  const rawHostRole = phase.hostRole;
+
+  if (
+    typeof rawPhaseName !== "string" ||
+    !VALID_PHASE_NAMES.has(rawPhaseName as WorkflowPhaseConfig["name"])
+  ) {
     throw createWorkflowConfigError(
       configPath,
       `workflow ${workflowName} 的 phases[${phaseIndex}].name 非法。`,
     );
   }
 
-  if (!phase.hostRole || !VALID_ROLE_NAMES.has(phase.hostRole)) {
+  if (
+    typeof rawHostRole !== "string" ||
+    !VALID_ROLE_NAMES.has(rawHostRole as WorkflowPhaseConfig["hostRole"])
+  ) {
     throw createWorkflowConfigError(
       configPath,
       `workflow ${workflowName} 的 phases[${phaseIndex}].hostRole 非法。`,
@@ -283,20 +361,52 @@ function validateWorkflowPhase(
     );
   }
 
-  if (phaseNames.has(phase.name)) {
+  const phaseName = rawPhaseName as WorkflowPhaseConfig["name"];
+  const hostRole = rawHostRole as WorkflowPhaseConfig["hostRole"];
+
+  if (phaseNames.has(phaseName)) {
     throw createWorkflowConfigError(
       configPath,
-      `workflow ${workflowName} 的 phases[${phaseIndex}].name 重复：${phase.name}。`,
+      `workflow ${workflowName} 的 phases[${phaseIndex}].name 重复：${phaseName}。`,
     );
   }
 
-  phaseNames.add(phase.name);
+  phaseNames.add(phaseName);
+
+  if (
+    phase.artifactInputPhases !== undefined &&
+    !Array.isArray(phase.artifactInputPhases)
+  ) {
+    throw createWorkflowConfigError(
+      configPath,
+      `workflow ${workflowName} 的 phases[${phaseIndex}].artifactInputPhases 必须是 phase 名数组。`,
+    );
+  }
+
+  const artifactInputPhases = Array.isArray(phase.artifactInputPhases)
+    ? phase.artifactInputPhases.map((item) => {
+        if (
+          typeof item !== "string" ||
+          !VALID_PHASE_NAMES.has(item as WorkflowPhaseConfig["name"])
+        ) {
+          throw createWorkflowConfigError(
+            configPath,
+            `workflow ${workflowName} 的 phases[${phaseIndex}].artifactInputPhases 包含非法阶段名：${String(item)}。`,
+          );
+        }
+
+        return item as WorkflowPhaseConfig["name"];
+      })
+    : undefined;
 
   return {
-    name: phase.name,
-    hostRole: phase.hostRole,
+    name: phaseName,
+    hostRole,
     needApproval: phase.needApproval,
     pauseForInput: phase.pauseForInput,
+    ...(artifactInputPhases !== undefined
+      ? { artifactInputPhases }
+      : {}),
   };
 }
 
@@ -317,7 +427,7 @@ function assignWorkflowField(
 }
 
 function assignPhaseField(
-  phase: Partial<WorkflowPhaseConfig>,
+  phase: MutableWorkflowPhase,
   key: string,
   rawValue: string,
 ): void {
@@ -343,6 +453,9 @@ function assignPhaseField(
       if (typeof value === "boolean") {
         phase.pauseForInput = value;
       }
+      break;
+    case "artifactInputPhases":
+      phase.artifactInputPhases = value;
       break;
     default:
       break;
@@ -594,11 +707,17 @@ function splitYamlKeyValue(
   };
 }
 
-function parseYamlScalar(value: string): string | number | boolean | undefined {
+function parseYamlScalar(
+  value: string,
+): string | number | boolean | string[] | undefined {
   const normalized = value.replace(/\s+#.*$/u, "").trim();
 
   if (!normalized) {
     return undefined;
+  }
+
+  if (normalized.startsWith("[") && normalized.endsWith("]")) {
+    return parseYamlInlineArray(normalized);
   }
 
   const unquoted =
@@ -620,4 +739,22 @@ function parseYamlScalar(value: string): string | number | boolean | undefined {
   }
 
   return unquoted;
+}
+
+function parseYamlInlineArray(value: string): string[] {
+  const content = value.slice(1, -1).trim();
+
+  if (content.length === 0) {
+    return [];
+  }
+
+  return content
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0)
+    .map((item) => {
+      const parsed = parseYamlScalar(item);
+
+      return typeof parsed === "string" ? parsed : String(parsed);
+    });
 }

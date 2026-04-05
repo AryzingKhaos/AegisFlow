@@ -69,6 +69,7 @@ export interface WorkflowPhaseConfig {
   hostRole: RoleName;
   needApproval: boolean;
   pauseForInput?: boolean;
+  artifactInputPhases?: Phase[];
 }
 
 export interface ProjectWorkflowDefinition {

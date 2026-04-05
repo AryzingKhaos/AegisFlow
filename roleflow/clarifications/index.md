@@ -31,3 +31,4 @@
 | `0.1.0` | `default-workflow-role-child-process-subcommand` | [0.1.0/default-workflow-role-child-process-subcommand-prd.md](0.1.0/default-workflow-role-child-process-subcommand-prd.md) |
 | `0.1.0` | `default-workflow-role-prompt-bootstrap` | [0.1.0/default-workflow-role-prompt-bootstrap-prd.md](0.1.0/default-workflow-role-prompt-bootstrap-prd.md) |
 | `0.1.0` | `default-workflow-final-artifact-markdown-output` | [0.1.0/default-workflow-final-artifact-markdown-output-prd.md](0.1.0/default-workflow-final-artifact-markdown-output-prd.md) |
+| `0.1.0` | `default-workflow-phase-artifact-input-phases` | [0.1.0/default-workflow-phase-artifact-input-phases-prd.md](0.1.0/default-workflow-phase-artifact-input-phases-prd.md) |
