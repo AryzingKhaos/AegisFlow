@@ -309,6 +309,19 @@ export class DefaultRoleAgentExecutor implements RoleAgentExecutor {
         },
       };
 
+      await emitExecutionDebugEvent(input.context, {
+        type: "executor_prompt",
+        source: "executor",
+        phase: input.context.phase,
+        roleName: input.roleName,
+        message: "executor received final prompt",
+        payload: input.prompt,
+        metadata: {
+          command: request.command,
+          args: request.args,
+          cwd: request.cwd,
+        },
+      });
       // transport 负责真正运行命令，并保证 stdout/stderr/exit 的异步 hook 已完成。
       await this.transport.execute(instrumentedRequest);
       // UI 可见输出和底层执行完成是两条异步链，需要单独等待。

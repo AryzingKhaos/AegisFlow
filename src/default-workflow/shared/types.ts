@@ -154,6 +154,7 @@ export type TaskDebugEventType =
   | "intake_message"
   | "workflow_event"
   | "role_visible_output"
+  | "executor_prompt"
   | "executor_stdout"
   | "executor_stderr"
   | "executor_exit"
