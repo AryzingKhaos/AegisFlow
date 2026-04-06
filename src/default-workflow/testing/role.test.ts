@@ -1018,12 +1018,16 @@ describe("role layer", () => {
 
     expect(observedDebugEvents.map((event) => event.type)).toEqual(
       expect.arrayContaining([
+        "executor_prompt",
         "executor_stdout",
         "executor_stderr",
         "executor_exit",
         "executor_result_payload",
       ]),
     );
+    expect(
+      observedDebugEvents.find((event) => event.type === "executor_prompt")?.payload,
+    ).toBe("PROMPT");
     expect(
       observedDebugEvents.find((event) => event.type === "executor_stdout")?.message,
     ).toBe("raw stdout line");
@@ -1112,12 +1116,16 @@ describe("role layer", () => {
     expect(result).toBe('{"summary":"done","artifacts":[]}');
     expect(observedDebugEvents.map((event) => event.type)).toEqual(
       expect.arrayContaining([
+        "executor_prompt",
         "executor_stdout",
         "executor_stderr",
         "executor_exit",
         "executor_result_payload",
       ]),
     );
+    expect(
+      observedDebugEvents.find((event) => event.type === "executor_prompt")?.payload,
+    ).toBe("PROMPT");
     expect(
       observedDebugEvents
         .filter((event) => event.type === "executor_stdout")

@@ -218,9 +218,11 @@ describe("workflow runtime", () => {
     expect(debugEvents).toContain('"type":"role_visible_output"');
     expect(debugEvents).toContain("builder 正在输出中间进度");
     expect(transcript).toContain("# Task Debug Transcript");
-    expect(transcript).toContain("## 任务概览");
-    expect(transcript).toContain("completionSummary: 任务完成。");
-    expect(transcript).toContain("runtimeFiles: task-state.json, task-state.md, task-context.json, workflow-events.jsonl, debug-events.jsonl");
+    expect(transcript).toContain("暂无 I/O 记录。");
+    expect(transcript).not.toContain("## 任务概览");
+    expect(transcript).not.toContain("completionSummary:");
+    expect(transcript).not.toContain("runtimeFiles:");
+    expect(transcript).not.toContain("builder 正在输出中间进度");
   });
 
   it("highlights executor raw failures in task debug transcript", async () => {
@@ -313,10 +315,12 @@ describe("workflow runtime", () => {
     expect(debugEvents).toContain('"type":"executor_stderr"');
     expect(debugEvents).toContain("Traceback: build failed hard");
     expect(debugEvents).toContain('"type":"error"');
-    expect(transcript).toContain("## 关键错误");
-    expect(transcript).toContain("Traceback: build failed hard");
-    expect(transcript).toContain("builder crashed");
-    expect(transcript).toContain("latestExecutorSignal:");
+    expect(transcript).toContain("# Task Debug Transcript");
+    expect(transcript).toContain("暂无 I/O 记录。");
+    expect(transcript).not.toContain("## 关键错误");
+    expect(transcript).not.toContain("Traceback: build failed hard");
+    expect(transcript).not.toContain("builder crashed");
+    expect(transcript).not.toContain("latestExecutorSignal:");
   });
 
   it("rebuilds runtime on resume and continues from the next approved phase", async () => {

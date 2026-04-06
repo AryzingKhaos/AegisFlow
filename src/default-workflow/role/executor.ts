@@ -269,6 +269,19 @@ export class DefaultRoleAgentExecutor implements RoleAgentExecutor {
         },
       };
 
+      await emitExecutionDebugEvent(input.context, {
+        type: "executor_prompt",
+        source: "executor",
+        phase: input.context.phase,
+        roleName: input.roleName,
+        message: "executor received final prompt",
+        payload: input.prompt,
+        metadata: {
+          command: request.command,
+          args: request.args,
+          cwd: request.cwd,
+        },
+      });
       await this.transport.execute(instrumentedRequest);
       await instrumentedRequest.flushVisibleOutput?.();
       const result = await instrumentedRequest.readResult();

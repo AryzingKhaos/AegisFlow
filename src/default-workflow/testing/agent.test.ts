@@ -110,8 +110,10 @@ describe("IntakeAgent", () => {
     expect(debugEvents).toContain("是否确认使用该 workflow？请回答 y/n，直接回车等同于 y。");
     expect(artifactDirInputIndex).toBeGreaterThan(-1);
     expect(runtimeInitMessageIndex).toBeGreaterThan(artifactDirInputIndex);
-    expect(transcript).toContain("lastUserInput:");
+    expect(transcript).toContain("## 1. User Input");
     expect(transcript).toContain(artifactDir);
+    expect(transcript).not.toContain("lastUserInput:");
+    expect(transcript).not.toContain("Runtime 初始化成功");
   });
 
   it("formats workflow events into readable cli blocks instead of raw object lines", async () => {
