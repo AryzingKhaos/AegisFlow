@@ -618,6 +618,26 @@ export class DefaultWorkflowController implements WorkflowController {
         "initial-requirement",
         buildInitialRequirementArtifact(input ?? ""),
       );
+    } else if (!existingInitialRequirement) {
+      throw new Error(
+        "Clarify execution context is incomplete: missing clarify/initial-requirement artifact.",
+      );
+    }
+
+    if (!existingDialogue && existingInitialRequirement) {
+      throw new Error(
+        "Clarify execution context is incomplete: missing clarify/clarify-dialogue artifact.",
+      );
+    }
+
+    if (!existingDialogue) {
+      await this.saveNamedArtifact(
+        workflowEvents,
+        phaseConfig,
+        "clarify-dialogue",
+        "clarify-dialogue",
+        buildInitialClarifyDialogueArtifact(),
+      );
     }
 
     if (existingDialogue && this.hasUsableInput(input)) {
@@ -629,6 +649,8 @@ export class DefaultWorkflowController implements WorkflowController {
         appendClarifyDialogueAnswer(existingDialogue, input ?? ""),
       );
     }
+
+    await this.assertClarifyExecutionContextReady(taskId);
 
     await this.pushEvent(
       workflowEvents,
@@ -714,6 +736,8 @@ export class DefaultWorkflowController implements WorkflowController {
     workflowEvents: WorkflowEvent[],
     phaseConfig: WorkflowPhaseConfig,
   ): Promise<void> {
+    await this.assertClarifyExecutionContextReady(this.dependencies.taskState.taskId);
+
     await this.pushEvent(
       workflowEvents,
       "role_start",
@@ -879,7 +903,10 @@ export class DefaultWorkflowController implements WorkflowController {
   ): Promise<string[]> {
     const allKeys = await artifactReader.list();
     const sourcePhases = this.resolveArtifactSourcePhases(phase);
-    const visibleKeys: string[] = [];
+    const visibleKeys =
+      phase === "clarify"
+        ? resolveClarifyExecutionArtifactKeys(allKeys)
+        : [];
 
     for (const sourcePhase of sourcePhases) {
       const finalArtifactKey = this.resolveVisibleFinalArtifactKey(
@@ -893,6 +920,26 @@ export class DefaultWorkflowController implements WorkflowController {
     }
 
     return visibleKeys;
+  }
+
+  private async assertClarifyExecutionContextReady(taskId: string): Promise<void> {
+    const artifactReader = this.createExecutionArtifactReader(taskId, "clarify");
+    const [initialRequirement, clarifyDialogue] = await Promise.all([
+      artifactReader.get("clarify/initial-requirement"),
+      artifactReader.get("clarify/clarify-dialogue"),
+    ]);
+
+    if (!initialRequirement || initialRequirement.trim().length === 0) {
+      throw new Error(
+        "Clarify execution context is incomplete: missing clarify/initial-requirement artifact.",
+      );
+    }
+
+    if (clarifyDialogue === undefined) {
+      throw new Error(
+        "Clarify execution context is incomplete: missing clarify/clarify-dialogue artifact.",
+      );
+    }
   }
 
   private resolveArtifactSourcePhases(phase: Phase): WorkflowPhaseConfig[] {
@@ -1294,6 +1341,10 @@ function buildInitialRequirementArtifact(input: string): string {
   return ["# Initial Requirement", "", input.trim()].join("\n");
 }
 
+function buildInitialClarifyDialogueArtifact(): string {
+  return ["# Clarify Dialogue", ""].join("\n");
+}
+
 function appendClarifyDialogueQuestion(
   existingContent: string,
   question: string,
@@ -1369,3 +1420,12 @@ function matchVisibleArtifactKey(
 
   return visibleKeys.find((visibleKey) => visibleKey.endsWith(`/${key}`));
 }
+
+function resolveClarifyExecutionArtifactKeys(allKeys: string[]): string[] {
+  return CLARIFY_EXECUTION_ARTIFACT_KEYS.filter((key) => allKeys.includes(key));
+}
+
+const CLARIFY_EXECUTION_ARTIFACT_KEYS = [
+  "clarify/initial-requirement",
+  "clarify/clarify-dialogue",
+] as const;

@@ -949,6 +949,120 @@ describe("workflow runtime", () => {
     expect(taskState.status).toBe(TaskStatus.COMPLETED);
   });
 
+  it("reinjects initial-requirement and clarify-dialogue into every clarify execution", async () => {
+    const root = await createTempProject();
+    const projectDir = path.join(root, "project");
+    const artifactDir = path.join(root, "artifacts");
+    await mkdir(projectDir, { recursive: true });
+
+    const workflowPhases: WorkflowPhaseConfig[] = [
+      {
+        name: "clarify",
+        hostRole: "clarifier",
+        needApproval: false,
+      },
+    ];
+    const projectConfig = createProjectConfig({
+      projectDir,
+      artifactDir,
+      workflow: createWorkflowSelection("feature_change"),
+      workflowPhases,
+    });
+    const artifactManager = new FileArtifactManager(projectConfig);
+    const taskState = createInitialTaskState(
+      "task_clarify_reinjection_case",
+      "clarify_reinjection_case",
+      workflowPhases,
+    );
+    await artifactManager.initializeTask(taskState.taskId);
+    await artifactManager.saveTaskContext({
+      taskId: taskState.taskId,
+      title: taskState.title,
+      description: "补齐 API 细节",
+      createdAt: Date.now(),
+      lastRuntimeId: "runtime_clarify_reinjection_case",
+      projectConfig,
+    });
+
+    const observedCalls: Array<{
+      input: string;
+      visibleKeys: string[];
+      initialRequirement?: string;
+      clarifyDialogue?: string;
+    }> = [];
+
+    const controller = new DefaultWorkflowController({
+      taskState,
+      projectConfig,
+      eventEmitter: new EventEmitter(),
+      eventLogger: new MemoryEventLogger(),
+      artifactManager,
+      roleRegistry: new TestRoleRegistry({
+        clarifier: createRole("clarifier", async (input, context) => {
+          observedCalls.push({
+            input,
+            visibleKeys: await context.artifacts.list(),
+            initialRequirement: await context.artifacts.get("clarify/initial-requirement"),
+            clarifyDialogue: await context.artifacts.get("clarify/clarify-dialogue"),
+          });
+
+          if (input.includes("正式生成 PRD")) {
+            return {
+              summary: "clarifier final prd",
+              artifacts: ["# Clarify PRD\n\nsource from reinjected dialogue"],
+            };
+          }
+
+          if (observedCalls.length === 1) {
+            return {
+              summary: "clarifier ask question",
+              artifacts: [],
+              phaseCompleted: false,
+              metadata: {
+                decision: "ask_next_question",
+                question: "请补充接口兼容范围",
+              },
+            };
+          }
+
+          return {
+            summary: "clarifier ready-for-prd",
+            artifacts: [],
+            metadata: {
+              decision: "ready_for_prd",
+            },
+          };
+        }),
+      }),
+    });
+
+    await controller.run(taskState.taskId, "补齐 API 细节");
+    expect(taskState.status).toBe(TaskStatus.WAITING_USER_INPUT);
+
+    await controller.handleIntakeEvent({
+      type: "participate",
+      taskId: taskState.taskId,
+      message: "接口返回 code 还要兼容旧版",
+      timestamp: Date.now(),
+    });
+
+    expect(taskState.status).toBe(TaskStatus.COMPLETED);
+    expect(observedCalls).toHaveLength(3);
+    expect(observedCalls.map((call) => call.visibleKeys)).toEqual([
+      ["clarify/initial-requirement", "clarify/clarify-dialogue"],
+      ["clarify/initial-requirement", "clarify/clarify-dialogue"],
+      ["clarify/initial-requirement", "clarify/clarify-dialogue"],
+    ]);
+    expect(observedCalls[0]?.initialRequirement).toContain("补齐 API 细节");
+    expect(observedCalls[0]?.clarifyDialogue).toContain("# Clarify Dialogue");
+    expect(observedCalls[1]?.clarifyDialogue).toContain("## Round 1 Question");
+    expect(observedCalls[1]?.clarifyDialogue).toContain("请补充接口兼容范围");
+    expect(observedCalls[1]?.clarifyDialogue).toContain("## Round 1 Answer");
+    expect(observedCalls[1]?.clarifyDialogue).toContain("接口返回 code 还要兼容旧版");
+    expect(observedCalls[2]?.initialRequirement).toContain("补齐 API 细节");
+    expect(observedCalls[2]?.clarifyDialogue).toContain("接口返回 code 还要兼容旧版");
+  });
+
   it("normalizes clarify final-prd before saving and exposing it to the next phase", async () => {
     const root = await createTempProject();
     const projectDir = path.join(root, "project");
@@ -1722,6 +1836,88 @@ describe("workflow runtime", () => {
       ),
     ).toBe(false);
     expect(events.at(-2)?.metadata?.error).toContain("artifactReady=false");
+  });
+
+  it("fails clarify when clarify-dialogue is missing before a follow-up clarify turn", async () => {
+    const root = await createTempProject();
+    const projectDir = path.join(root, "project");
+    const artifactDir = path.join(root, "artifacts");
+    await mkdir(projectDir, { recursive: true });
+
+    const workflowPhases: WorkflowPhaseConfig[] = [
+      {
+        name: "clarify",
+        hostRole: "clarifier",
+        needApproval: false,
+      },
+    ];
+    const projectConfig = createProjectConfig({
+      projectDir,
+      artifactDir,
+      workflow: createWorkflowSelection("feature_change"),
+      workflowPhases,
+    });
+    const artifactManager = new FileArtifactManager(projectConfig);
+    const taskState = createInitialTaskState(
+      "task_clarify_missing_dialogue_case",
+      "clarify_missing_dialogue_case",
+      workflowPhases,
+    );
+    await artifactManager.initializeTask(taskState.taskId);
+    await artifactManager.saveTaskContext({
+      taskId: taskState.taskId,
+      title: taskState.title,
+      description: "补齐 API 细节",
+      createdAt: Date.now(),
+      lastRuntimeId: "runtime_clarify_missing_dialogue_case",
+      projectConfig,
+    });
+
+    const controller = new DefaultWorkflowController({
+      taskState,
+      projectConfig,
+      eventEmitter: new EventEmitter(),
+      eventLogger: new MemoryEventLogger(),
+      artifactManager,
+      roleRegistry: new TestRoleRegistry({
+        clarifier: createRole("clarifier", async () => ({
+          summary: "clarifier ask question",
+          artifacts: [],
+          phaseCompleted: false,
+          metadata: {
+            decision: "ask_next_question",
+            question: "请补充接口兼容范围",
+          },
+        })),
+      }),
+    });
+
+    await controller.run(taskState.taskId, "补齐 API 细节");
+    expect(taskState.status).toBe(TaskStatus.WAITING_USER_INPUT);
+
+    await rm(
+      path.join(
+        artifactDir,
+        "tasks",
+        taskState.taskId,
+        "artifacts",
+        "clarify",
+        "clarify-dialogue.md",
+      ),
+    );
+
+    const events = await controller.handleIntakeEvent({
+      type: "participate",
+      taskId: taskState.taskId,
+      message: "接口返回 code 还要兼容旧版",
+      timestamp: Date.now(),
+    });
+
+    expect(taskState.status).toBe(TaskStatus.FAILED);
+    expect(events.at(-2)?.type).toBe("error");
+    expect(events.at(-2)?.metadata?.error).toContain(
+      "missing clarify/clarify-dialogue artifact",
+    );
   });
 
   it("defers participate input while task is running under one-shot execution", async () => {
