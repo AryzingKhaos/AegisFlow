@@ -14,6 +14,7 @@ import {
 } from "./ui-model";
 import {
   buildOutputRegionLayout,
+  type MainOutputEntry,
   normalizeDisplayNewlines,
   type OutputRegionLayout,
 } from "./output-layout";
@@ -67,8 +68,7 @@ interface InkModuleShape {
 }
 
 const h = React.createElement;
-const MAX_VISIBLE_INTERMEDIATE_LINES_IDLE = 3;
-const MAX_VISIBLE_INTERMEDIATE_LINES_RUNNING = 7;
+const MAX_VISIBLE_PROCESS_DETAIL_LINES = 6;
 const SPINNER_FRAMES = ["-", "\\", "|", "/"];
 
 export async function runCliApp(): Promise<unknown> {
@@ -392,41 +392,42 @@ function OutputPanel(input: { viewModel: CliViewModel }): unknown {
     };
   }, [isRunning]);
 
-  const intermediateLabel = isRunning
-    ? `${SPINNER_FRAMES[spinnerIndex]} 过程输出`
-    : "过程输出";
   const regions = buildOutputRegionLayout(
     input.viewModel,
-    isRunning
-      ? MAX_VISIBLE_INTERMEDIATE_LINES_RUNNING
-      : MAX_VISIBLE_INTERMEDIATE_LINES_IDLE,
+    MAX_VISIBLE_PROCESS_DETAIL_LINES,
   );
 
-  return h(ContentSection, {
-    title: "输出",
-    borderColor: THEME.chrome.borderMuted,
-    titleColor: THEME.text.secondary,
-    marginTop: 1,
-    children:
-      regions.length > 0
-        ? regions.map((region, index) =>
-            renderOutputRegion(region, {
-              key: `${region.kind}_region`,
-              marginTop: index === 0 ? 0 : 1,
-              intermediateTitle: intermediateLabel,
-            }),
-          )
-        : [
-            h(
-              Text,
-              {
-                key: "empty-output",
-                color: THEME.text.dim,
-              },
-              "等待输入。",
-            ),
-          ],
-  });
+  if (regions.length === 0) {
+    return h(
+      Box,
+      {
+        marginTop: 1,
+        flexDirection: "column",
+      },
+      h(
+        Text,
+        {
+          color: THEME.text.dim,
+        },
+        "等待输入。",
+      ),
+    );
+  }
+
+  return h(
+    Box,
+    {
+      marginTop: 1,
+      flexDirection: "column",
+    },
+    ...regions.map((region, index) =>
+      renderOutputRegion(region, {
+        key: `${region.kind}_region`,
+        marginTop: index === 0 ? 0 : 1,
+        spinnerIndex,
+      }),
+    ),
+  );
 }
 
 function renderOutputRegion(
@@ -434,27 +435,22 @@ function renderOutputRegion(
   input: {
     key: string;
     marginTop: number;
-    intermediateTitle: string;
+    spinnerIndex: number;
   },
 ): unknown {
   switch (region.kind) {
-    case "result":
-      return h(ResultRegion, {
+    case "main_stream":
+      return h(MainOutputStream, {
         key: input.key,
-        blocks: region.blocks,
+        entries: region.entries,
         marginTop: input.marginTop,
       });
-    case "skeleton":
-      return h(SkeletonRegion, {
+    case "process":
+      return h(ProcessRegion, {
         key: input.key,
-        blocks: region.blocks,
-        marginTop: input.marginTop,
-      });
-    case "intermediate":
-      return h(IntermediateRegion, {
-        key: input.key,
-        title: input.intermediateTitle,
-        lines: region.lines,
+        title: `${SPINNER_FRAMES[input.spinnerIndex]} 运行中`,
+        summary: region.summary,
+        lines: region.detailLines,
         hasOmittedLines: region.hasOmittedLines,
         marginTop: input.marginTop,
       });
@@ -497,26 +493,44 @@ function ContentSection(input: {
   );
 }
 
-function ResultRegion(input: {
-  blocks: UiBlock[];
+function MainOutputStream(input: {
+  entries: MainOutputEntry[];
   marginTop: number;
 }): unknown {
-  return h(ContentSection, {
-    title: "结果输出",
-    borderColor: THEME.result.border,
-    titleColor: THEME.result.title,
-    marginTop: input.marginTop,
-    children: input.blocks.map((block, index) =>
-      h(ResultBlock, {
-        key: block.id,
-        block,
-        isLast: index === input.blocks.length - 1,
+  return h(
+    Box,
+    {
+      marginTop: input.marginTop,
+      flexDirection: "column",
+    },
+    ...input.entries.map((entry, index) =>
+      h(MainOutputEntryBlock, {
+        key: entry.block.id,
+        entry,
+        isLast: index === input.entries.length - 1,
       }),
     ),
+  );
+}
+
+function MainOutputEntryBlock(input: {
+  entry: MainOutputEntry;
+  isLast: boolean;
+}): unknown {
+  if (input.entry.source === "skeleton") {
+    return h(SkeletonStreamEntry, {
+      block: input.entry.block,
+      isLast: input.isLast,
+    });
+  }
+
+  return h(FinalStreamEntry, {
+    block: input.entry.block,
+    isLast: input.isLast,
   });
 }
 
-function ResultBlock(input: {
+function FinalStreamEntry(input: {
   block: UiBlock;
   isLast: boolean;
 }): unknown {
@@ -527,11 +541,7 @@ function ResultBlock(input: {
     Box,
     {
       marginBottom: input.isLast ? 0 : 1,
-      borderStyle: "round",
-      borderColor: toneStyle.border,
       flexDirection: "column",
-      paddingX: 1,
-      paddingY: 0,
     },
     input.block.title
       ? h(
@@ -549,7 +559,7 @@ function ResultBlock(input: {
         {
           key: `${input.block.id}_body_${String(index)}`,
           color: toneStyle.body,
-          dimColor: input.block.tone === "system",
+          dimColor: false,
         },
         line,
       ),
@@ -557,26 +567,7 @@ function ResultBlock(input: {
   );
 }
 
-function SkeletonRegion(input: {
-  blocks: UiBlock[];
-  marginTop: number;
-}): unknown {
-  return h(ContentSection, {
-    title: "骨架输出",
-    borderColor: THEME.skeleton.border,
-    titleColor: THEME.skeleton.title,
-    marginTop: input.marginTop,
-    children: input.blocks.map((block, index) =>
-      h(SkeletonBlock, {
-        key: block.id,
-        block,
-        isLast: index === input.blocks.length - 1,
-      }),
-    ),
-  });
-}
-
-function SkeletonBlock(input: {
+function SkeletonStreamEntry(input: {
   block: UiBlock;
   isLast: boolean;
 }): unknown {
@@ -610,42 +601,58 @@ function SkeletonBlock(input: {
   );
 }
 
-function IntermediateRegion(input: {
+function ProcessRegion(input: {
   title: string;
+  summary: string;
   lines: string[];
   hasOmittedLines: boolean;
   marginTop: number;
 }): unknown {
-  return h(ContentSection, {
-    title: input.title,
-    borderColor: THEME.intermediate.border,
-    titleColor: THEME.intermediate.title,
-    marginTop: input.marginTop,
-    children: [
-      ...input.lines.map((line, index) =>
-        h(
-          Text,
-          {
-            key: `intermediate_line_${String(index)}`,
-            color: THEME.intermediate.line,
-          },
-          line,
-        ),
+  return h(
+    Box,
+    {
+      marginTop: input.marginTop,
+      flexDirection: "column",
+    },
+    h(
+      Text,
+      {
+        color: THEME.intermediate.title,
+        bold: true,
+      },
+      input.title,
+    ),
+    h(
+      Text,
+      {
+        color: THEME.intermediate.title,
+      },
+      input.summary,
+    ),
+    ...input.lines.map((line, index) =>
+      h(
+        Text,
+        {
+          key: `intermediate_line_${String(index)}`,
+          color: THEME.intermediate.line,
+          dimColor: true,
+        },
+        line,
       ),
-      ...(input.hasOmittedLines
-        ? [
-            h(
-              Text,
-              {
-                key: "intermediate_ellipsis",
-                color: THEME.intermediate.empty,
-              },
-              "...",
-            ),
-          ]
-        : []),
-    ],
-  });
+    ),
+    ...(input.hasOmittedLines
+      ? [
+          h(
+            Text,
+            {
+              key: "intermediate_ellipsis",
+              color: THEME.intermediate.empty,
+            },
+            "...",
+          ),
+        ]
+      : []),
+  );
 }
 
 function LabeledBlock(input: {

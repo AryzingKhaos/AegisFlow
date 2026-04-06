@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { compactSkeletonBody, resolveResultToneStyle, THEME } from "./theme";
 
 describe("cli theme", () => {
-  it("keeps separate token groups for result, skeleton, and intermediate areas", () => {
+  it("keeps separate token groups for result, skeleton, and intermediate content", () => {
     expect(THEME.result.title).not.toBe(THEME.skeleton.title);
     expect(THEME.skeleton.title).not.toBe(THEME.intermediate.title);
     expect(THEME.result.border).not.toBe(THEME.skeleton.border);
@@ -13,18 +13,16 @@ describe("cli theme", () => {
     const errorStyle = resolveResultToneStyle("error");
 
     expect(resultStyle.title).toBe(THEME.result.title);
-    expect(resultStyle.border).toBe(THEME.result.border);
     expect(errorStyle.title).toBe(THEME.error.title);
-    expect(errorStyle.border).toBe(THEME.error.border);
     expect(errorStyle.title).not.toBe(resultStyle.title);
   });
 
-  it("maps system blocks to secondary result styling", () => {
+  it("maps system blocks to khaki text instead of secondary muted text", () => {
     const systemStyle = resolveResultToneStyle("system");
 
     expect(systemStyle.title).toBe(THEME.result.system);
-    expect(systemStyle.body).toBe(THEME.text.secondary);
-    expect(systemStyle.border).toBe(THEME.chrome.borderMuted);
+    expect(systemStyle.body).toBe(THEME.result.system);
+    expect(systemStyle.body).not.toBe(THEME.text.secondary);
   });
 
   it("compacts skeleton copy into fast-scan single lines", () => {
