@@ -34,4 +34,5 @@
 | `0.1.0` | `default-workflow-phase-artifact-input-phases` | [0.1.0/default-workflow-phase-artifact-input-phases-prd.md](0.1.0/default-workflow-phase-artifact-input-phases-prd.md) |
 | `0.1.0` | `default-workflow-intake-ui-theme-refinement` | [0.1.0/default-workflow-intake-ui-theme-refinement-prd.md](0.1.0/default-workflow-intake-ui-theme-refinement-prd.md) |
 | `0.1.0` | `default-workflow-intake-output-structure-separation` | [0.1.0/default-workflow-intake-output-structure-separation-prd.md](0.1.0/default-workflow-intake-output-structure-separation-prd.md) |
+| `0.1.0` | `default-workflow-intake-codex-style-output-stream` | [0.1.0/default-workflow-intake-codex-style-output-stream-prd.md](0.1.0/default-workflow-intake-codex-style-output-stream-prd.md) |
 | `0.1.0` | `default-workflow-task-debug-transcript-codex-io-only` | [0.1.0/default-workflow-task-debug-transcript-codex-io-only-prd.md](0.1.0/default-workflow-task-debug-transcript-codex-io-only-prd.md) |
