@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildOutputRegionLayout } from "./output-layout";
+import { buildOutputRegionLayout, buildProcessSummary } from "./output-layout";
 import type { CliViewModel, UiBlock } from "./ui-model";
 
 describe("cli output layout", () => {
-  it("keeps result, skeleton, and intermediate content in fixed region order", () => {
+  it("merges final and skeleton content into a single main stream ordered by block order", () => {
     const layout = buildOutputRegionLayout(
       createViewModel({
         finalBlocks: [createBlock("result-1", 4, "result")],
@@ -13,77 +13,102 @@ describe("cli output layout", () => {
         ],
         intermediateLines: ["step-1", "step-2"],
       }),
-      5,
+      6,
     );
 
-    expect(layout.map((region) => region.kind)).toEqual([
-      "result",
-      "skeleton",
-      "intermediate",
-    ]);
-    expect(layout[0]?.kind).toBe("result");
-    expect(layout[0]?.kind === "result" ? layout[0].blocks.map((block) => block.id) : []).toEqual([
-      "result-1",
-    ]);
+    expect(layout.map((region) => region.kind)).toEqual(["main_stream", "process"]);
     expect(
-      layout[1]?.kind === "skeleton"
-        ? layout[1].blocks.map((block) => block.id)
+      layout[0]?.kind === "main_stream"
+        ? layout[0].entries.map((entry) => `${entry.source}:${entry.block.id}`)
         : [],
-    ).toEqual(["skeleton-1", "skeleton-2"]);
-    expect(
-      layout[2]?.kind === "intermediate" ? layout[2].lines : [],
-    ).toEqual(["step-1", "step-2"]);
+    ).toEqual([
+      "skeleton:skeleton-1",
+      "final:result-1",
+      "skeleton:skeleton-2",
+    ]);
+    expect(layout[1]).toMatchObject({
+      kind: "process",
+      detailLines: ["step-1", "step-2"],
+      hasOmittedLines: false,
+    });
   });
 
-  it("renders only regions that actually have content", () => {
+  it("renders only the main stream when the task is not running", () => {
     expect(
       buildOutputRegionLayout(
         createViewModel({
+          taskStatus: "completed",
           skeletonBlocks: [createBlock("skeleton-1", 0, "system")],
         }),
-        3,
+        6,
       ).map((region) => region.kind),
-    ).toEqual(["skeleton"]);
+    ).toEqual(["main_stream"]);
 
     expect(
       buildOutputRegionLayout(
         createViewModel({
+          taskStatus: "completed",
           intermediateLines: ["progress"],
         }),
-        3,
+        6,
       ).map((region) => region.kind),
-    ).toEqual(["intermediate"]);
+    ).toEqual([]);
 
-    expect(buildOutputRegionLayout(createViewModel(), 3)).toEqual([]);
+    expect(buildOutputRegionLayout(createViewModel({ taskStatus: "completed" }), 6)).toEqual([]);
   });
 
-  it("truncates intermediate lines inside the intermediate region only", () => {
+  it("keeps process summary visible and truncates detail lines to the latest six lines", () => {
     const layout = buildOutputRegionLayout(
       createViewModel({
-        intermediateLines: ["line-1\\nline-2", "line-3"],
+        currentPhase: "build",
+        intermediateLines: [
+          "line-1",
+          "line-2",
+          "line-3",
+          "line-4",
+          "line-5",
+          "line-6",
+          "line-7",
+        ],
       }),
-      2,
+      6,
     );
 
     expect(layout).toHaveLength(1);
     expect(layout[0]).toMatchObject({
-      kind: "intermediate",
-      lines: ["line-1", "line-2"],
+      kind: "process",
+      summary: "运行中 · build · line-7",
+      detailLines: ["line-2", "line-3", "line-4", "line-5", "line-6", "line-7"],
       hasOmittedLines: true,
     });
+  });
+
+  it("builds a fallback process summary when there is no detail line yet", () => {
+    expect(
+      buildProcessSummary(
+        {
+          currentPhase: "clarify",
+          taskStatus: "running",
+        },
+        undefined,
+      ),
+    ).toBe("运行中 · clarify · 等待新的过程输出");
   });
 });
 
 function createViewModel(
   overrides: Partial<
-    Pick<CliViewModel, "finalBlocks" | "skeletonBlocks" | "intermediateLines">
+    Pick<
+      CliViewModel,
+      "currentPhase" | "taskStatus" | "finalBlocks" | "skeletonBlocks" | "intermediateLines"
+    >
   > = {},
 ): CliViewModel {
   return {
     appTitle: "AegisFlow Intake",
     sessionTitle: "demo",
-    currentPhase: "clarify",
-    taskStatus: "running",
+    currentPhase: overrides.currentPhase ?? "clarify",
+    taskStatus: overrides.taskStatus ?? "running",
     inputHint: "输入需求或任务控制指令",
     nextBlockOrder: 0,
     finalBlocks: overrides.finalBlocks ?? [],

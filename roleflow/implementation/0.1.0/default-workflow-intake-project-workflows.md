@@ -134,6 +134,7 @@ flowchart TD
 - [x] 收敛 `WorkflowSelection` 或等价运行时结构，使其能表达项目侧 Selected Workflow，而不再只表达系统内置 taskType 标签。
 - [x] 修改 Runtime 初始化输入组装逻辑，确保 `buildRuntimeForNewTask()` 接收的 `workflow` 与 `workflowPhases` 来自 Selected Workflow，而不是 `createDefaultWorkflowPhases()`。
 - [x] 移除或封堵 workflow 选择链路中的静默默认回退，确保配置非法、缺失 `description` 或 catalog 不存在时不会继续启动任务。
+- [x] 收敛 workflow 配置读取失败后的 Intake 重试状态，确保用户可以重新输入 `projectDir`，且默认/相对 `artifactDir` 会随新项目目录重新解析。
 - [x] 同步更新 `.aegisflow/aegisproject.yaml` 示例与相关文档，收敛到 `workflows` 复数结构，不再延续单个 `workflow:` 示例。
 - [x] 更新或新增测试，覆盖 catalog 读取、非法配置阻断、description 推荐、确认/改选、Selected Workflow 写入 Runtime、以及无默认回退路径。
 - [x] 完成自检，确认本次改造没有把 workflow 内部 phase 语义重新写死到 Intake，也没有保留隐藏的默认 workflow 降级路径。

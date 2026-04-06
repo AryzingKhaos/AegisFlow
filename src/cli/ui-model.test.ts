@@ -130,6 +130,37 @@ describe("cli ui model", () => {
     expect(viewModel.intermediateLines).toEqual([]);
   });
 
+  it("keeps a shared block order across skeleton and final streams for later main-stream merge", () => {
+    let viewModel = createInitialCliViewModel([]);
+
+    viewModel = applyWorkflowEventToCliViewModel(
+      viewModel,
+      createWorkflowEvent("phase_start", "clarify 开始", {
+        phase: "clarify",
+      }),
+    );
+    viewModel = appendSystemLines(viewModel, ["准备读取项目配置"], "系统消息");
+    viewModel = applyWorkflowEventToCliViewModel(
+      viewModel,
+      createWorkflowEvent("role_output", "最终方案已确认", {
+        outputKind: "summary",
+        phase: "clarify",
+        roleName: "clarifier",
+      }),
+    );
+
+    const sharedOrders = [
+      ...viewModel.skeletonBlocks.map((block) => block.order),
+      ...viewModel.finalBlocks.map((block) => block.order),
+    ].sort((left, right) => left - right);
+
+    expect(sharedOrders).toEqual([0, 1, 2]);
+    expect(viewModel.finalBlocks.map((block) => block.tone)).toEqual([
+      "system",
+      "result",
+    ]);
+  });
+
   it("maps runtime error events into a structured current error view", () => {
     const viewModel = applyWorkflowEventToCliViewModel(
       createInitialCliViewModel([]),

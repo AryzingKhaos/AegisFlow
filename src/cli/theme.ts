@@ -56,7 +56,6 @@ export const THEME = {
 } as const;
 
 export interface ResultToneStyle {
-  border: string;
   title: string;
   body: string;
   eyebrow: string;
@@ -69,28 +68,24 @@ export function resolveResultToneStyle(
     case "result":
     case "accent":
       return {
-        border: THEME.result.border,
         title: THEME.result.title,
         body: THEME.result.body,
         eyebrow: THEME.result.highlight,
       };
     case "system":
       return {
-        border: THEME.chrome.borderMuted,
         title: THEME.result.system,
-        body: THEME.text.secondary,
+        body: THEME.result.system,
         eyebrow: THEME.result.system,
       };
     case "error":
       return {
-        border: THEME.error.border,
         title: THEME.error.title,
         body: THEME.error.body,
         eyebrow: THEME.error.title,
       };
     default:
       return {
-        border: THEME.chrome.borderMuted,
         title: THEME.result.highlight,
         body: THEME.result.body,
         eyebrow: THEME.result.highlight,
