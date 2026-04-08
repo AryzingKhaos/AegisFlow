@@ -979,7 +979,7 @@ export class IntakeAgent {
     return [
       prefix,
       "当前阶段只需要一个简短标题，不需要详细描述。",
-      "请提供工件保存目录。",
+      "请提供【工件保存目录】。",
       "绝对路径会立即创建；默认目录或相对路径会在确认目标项目目录后创建。",
       "直接回车将使用目标项目目录下的默认目录 .aegisflow/artifacts。",
       "如果输入相对路径，也会基于目标项目目录解析。",
@@ -1054,7 +1054,7 @@ export class IntakeAgent {
       return [
         ...prefixLines,
         `已读取项目 workflow 配置：${workflowCatalog.configPath}`,
-        `推荐 workflow：${recommendation.workflow.name}`,
+        `【推荐 workflow】：${recommendation.workflow.name}`,
         `推荐理由：${recommendation.reason}`,
         `workflow 描述：${recommendation.workflow.description}`,
         `流程编排：${formatWorkflowPhases(recommendation.workflow.phases)}`,
