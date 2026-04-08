@@ -26,14 +26,13 @@ describe("IntakeAgent", () => {
     const agent = new IntakeAgent("/tmp");
 
     expect(agent.getBootstrapLines()).toContain(
-      "开始新任务时会先确认工件目录设置：绝对路径会立即创建，默认目录或相对路径会在确认目标项目目录后创建。工件目录就绪后再收集需求，并从项目的 .aegisflow/aegisproject.yaml 推荐 workflow。",
+      "开始新任务时会先收集需求标题（不需要详细描述），再确认工件目录、目标项目目录和 workflow；任务目录创建后，才会继续收集详细描述或 PRD。",
     );
 
     const lines = await agent.handleUserInput("修复登录报错");
 
-    expect(lines).toContain(
-      "请先提供工件保存目录。绝对路径会立即创建；默认目录或相对路径会在确认目标项目目录后创建。工件目录就绪后，再描述需求并选择 workflow。",
-    );
+    expect(lines).toContain("已记录需求标题：修复登录报错");
+    expect(lines).toContain("当前阶段只需要一个简短标题，不需要详细描述。");
   });
 
   it("accepts cancel commands during pending collection steps", async () => {
@@ -61,12 +60,13 @@ describe("IntakeAgent", () => {
     const artifactLines = await firstAgent.handleUserInput(artifactDir);
     await firstAgent.handleUserInput("");
     await firstAgent.handleUserInput(projectDir);
-    const startLines = await firstAgent.handleUserInput("y");
+    await firstAgent.handleUserInput("y");
+    const startLines = await firstAgent.handleUserInput("复现步骤在 iOS 端稳定出现。");
     const interruptResult = await firstAgent.handleInterruptSignal();
     const [taskId] = await readdir(path.join(artifactDir, "tasks"));
 
     expect(artifactLines.join("\n")).toContain(`工件目录已创建：${artifactDir}`);
-    expect(startLines.join("\n")).toContain(`工件目录：${artifactDir}`);
+    expect(startLines.join("\n")).toContain("已记录详细需求说明。");
     expect(interruptResult.lines.join("\n")).toContain("status=interrupted");
 
     const secondAgent = new IntakeAgent(root);
@@ -90,6 +90,7 @@ describe("IntakeAgent", () => {
     await agent.handleUserInput("");
     await agent.handleUserInput(projectDir);
     await agent.handleUserInput("");
+    await agent.handleUserInput("复现步骤在 iOS 端稳定出现。");
 
     const [taskId] = await readdir(path.join(artifactDir, "tasks"));
     const debugEvents = await readFile(
@@ -123,6 +124,7 @@ describe("IntakeAgent", () => {
       "(empty input)",
       projectDir,
       "(empty input)",
+      "复现步骤在 iOS 端稳定出现。",
     ]);
     expect(debugEvents).toContain(`工件目录已创建：${artifactDir}`);
     expect(debugEvents).toContain(`目标项目目录已确认：${projectDir}`);
@@ -146,7 +148,7 @@ describe("IntakeAgent", () => {
     await agent.handleUserInput("");
     await agent.handleUserInput(projectDir);
     await agent.handleUserInput("");
-    const lines = await agent.handleUserInput("");
+    const lines = await agent.handleUserInput("复现步骤在 iOS 端稳定出现。");
 
     const rendered = lines.join("\n");
     expect(rendered).toContain("=== 任务开始 ===");
@@ -178,9 +180,9 @@ describe("IntakeAgent", () => {
     await agent.handleUserInput("");
     await agent.handleUserInput(projectDir);
     await agent.handleUserInput("");
-    const lines = await agent.handleUserInput("");
+    const lines = await agent.handleUserInput("复现步骤在 iOS 端稳定出现。");
 
-    expect(lines.join("\n")).toContain("Runtime 初始化成功");
+    expect(lines).toEqual(["已记录详细需求说明。"]);
     expect(lines.join("\n")).not.toContain("=== 任务开始 ===");
     expect(streamedLines.join("\n")).toContain("=== 任务开始 ===");
     expect(streamedLines.join("\n")).toContain(
@@ -201,7 +203,7 @@ describe("IntakeAgent", () => {
     await agent.handleUserInput("");
     await agent.handleUserInput(projectDir);
     await agent.handleUserInput("");
-    await agent.handleUserInput("");
+    await agent.handleUserInput("复现步骤在 iOS 端稳定出现。");
     await agent.handleInterruptSignal();
 
     const runtimeIdBeforeResume = (agent as unknown as { runtime?: { runtimeId: string } })
@@ -227,7 +229,7 @@ describe("IntakeAgent", () => {
     await agent.handleUserInput("");
     await agent.handleUserInput(projectDir);
     await agent.handleUserInput("");
-    await agent.handleUserInput("");
+    await agent.handleUserInput("复现步骤在 iOS 端稳定出现。");
 
     const runtime = (agent as unknown as {
       runtime?: {
@@ -390,10 +392,9 @@ describe("IntakeAgent", () => {
 
     await agent.handleUserInput("修复登录报错");
     await agent.handleUserInput("");
-    const projectDirLines = await agent.handleUserInput(projectDir);
-    const lines = await agent.handleUserInput("");
+    const lines = await agent.handleUserInput(projectDir);
 
-    expect(projectDirLines).toContain(`目标项目目录已确认：${projectDir}`);
+    expect(lines).toContain(`目标项目目录已确认：${projectDir}`);
     expect(lines).toContain(`推荐 workflow：bugfix-workflow`);
     expect(lines.some((line) => line.includes("推荐理由："))).toBe(true);
     expect(lines).toContain(
@@ -412,7 +413,6 @@ describe("IntakeAgent", () => {
     await agent.handleUserInput("修复登录报错");
     await agent.handleUserInput("");
     await agent.handleUserInput(projectDir);
-    await agent.handleUserInput("");
     const selectionLines = await agent.handleUserInput("n");
 
     expect(selectionLines).toContain("请从当前项目配置中改选其他 workflow：");
@@ -459,8 +459,7 @@ describe("IntakeAgent", () => {
 
     await agent.handleUserInput("修复登录报错");
     await agent.handleUserInput("");
-    await agent.handleUserInput(projectDir);
-    const recommendationLines = await agent.handleUserInput("");
+    const recommendationLines = await agent.handleUserInput(projectDir);
     const confirmLines = await agent.handleUserInput("");
 
     expect(recommendationLines).toContain(
@@ -470,7 +469,7 @@ describe("IntakeAgent", () => {
     expect(confirmLines.join("\n")).toContain("Runtime 初始化成功");
   });
 
-  it("creates the artifact directory before asking for the task description", async () => {
+  it("creates the artifact directory before asking for the project directory", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "aegisflow-agent-"));
     tempDirs.push(root);
     const artifactDir = path.join(root, "custom-artifacts");
@@ -484,11 +483,11 @@ describe("IntakeAgent", () => {
     expect(artifactPromptLines).toContain("直接回车将使用目标项目目录下的默认目录 .aegisflow/artifacts。");
     expect(artifactDirEntries).toContain("custom-artifacts");
     expect(confirmationLines).toContain(`工件目录已创建：${artifactDir}`);
-    expect(confirmationLines).toContain("如需引用已有 PRD、计划文档或其他前置工件，请先放入该目录，再描述任务。");
-    expect(confirmationLines).toContain("请输入完整需求；如果沿用当前草稿，直接回车即可。");
+    expect(confirmationLines).toContain("下一步会基于需求标题和项目中的 workflow 配置给出推荐。");
+    expect(confirmationLines).toContain("请提供目标项目目录。直接回车、输入“默认”或“当前目录”将使用当前工作目录。");
   });
 
-  it("lets the user reuse the initial requirement after creating the artifact directory", async () => {
+  it("collects the initial requirement only after the task directory is created", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "aegisflow-agent-"));
     tempDirs.push(root);
     const projectDir = path.join(root, "project");
@@ -498,13 +497,253 @@ describe("IntakeAgent", () => {
 
     await agent.handleUserInput("修复登录报错");
     await agent.handleUserInput("");
-    const descriptionLines = await agent.handleUserInput(projectDir);
-    const workflowLines = await agent.handleUserInput("");
+    const workflowLines = await agent.handleUserInput(projectDir);
+    const bootstrapLines = await agent.handleUserInput("");
+    const startLines = await agent.handleUserInput("修复登录报错");
+    const taskId = (agent as unknown as { runtime?: { taskState: { taskId: string } } })
+      .runtime?.taskState.taskId;
 
-    expect(descriptionLines).toContain(`目标项目目录已确认：${projectDir}`);
-    expect(descriptionLines).toContain(`工件目录已创建：${path.resolve(projectDir, ".aegisflow", "artifacts")}`);
-    expect(workflowLines).toContain("需求已记录：修复登录报错");
+    expect(workflowLines).toContain(`目标项目目录已确认：${projectDir}`);
+    expect(workflowLines).toContain(`工件目录已创建：${path.resolve(projectDir, ".aegisflow", "artifacts")}`);
     expect(workflowLines).toContain("推荐 workflow：bugfix-workflow");
+    expect(bootstrapLines).toContain(
+      `任务目录已创建：${path.resolve(projectDir, ".aegisflow", "artifacts", "tasks", taskId ?? "")}`,
+    );
+    expect(startLines).toContain("已记录详细需求说明。");
+    expect(startLines.join("\n")).toContain("=== 任务开始 ===");
+  });
+
+  it("writes only the prd path into initial-requirement and keeps latestInput as that path", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "aegisflow-agent-"));
+    tempDirs.push(root);
+    const projectDir = path.join(root, "project");
+    await mkdir(projectDir, { recursive: true });
+    await writeProjectWorkflowConfig(projectDir);
+    const agent = new IntakeAgent(root);
+
+    await agent.handleUserInput("修复登录报错");
+    await agent.handleUserInput("");
+    await agent.handleUserInput(projectDir);
+    await agent.handleUserInput("");
+
+    const runtime = (agent as unknown as {
+      runtime?: {
+        taskState: { taskId: string };
+        projectConfig: { artifactDir: string };
+      };
+    }).runtime;
+    const taskId = runtime?.taskState.taskId ?? "";
+    const prdPath = `tasks/${taskId}/docs/input-prd.md`;
+    await mkdir(
+      path.join(
+        runtime?.projectConfig.artifactDir ?? "",
+        "tasks",
+        taskId,
+        "docs",
+      ),
+      { recursive: true },
+    );
+    await writeFile(
+      path.join(
+        runtime?.projectConfig.artifactDir ?? "",
+        "tasks",
+        taskId,
+        "docs",
+        "input-prd.md",
+      ),
+      "# input prd",
+      "utf8",
+    );
+
+    await agent.handleUserInput(prdPath);
+
+    const initialRequirement = await readFile(
+      path.join(
+        runtime?.projectConfig.artifactDir ?? "",
+        "tasks",
+        taskId,
+        "artifacts",
+        "clarify",
+        "initial-requirement.md",
+      ),
+      "utf8",
+    );
+    const taskContext = JSON.parse(
+      await readFile(
+        path.join(
+          runtime?.projectConfig.artifactDir ?? "",
+          "tasks",
+          taskId,
+          "runtime",
+          "task-context.json",
+        ),
+        "utf8",
+      ),
+    ) as {
+      latestInput?: string;
+      initialRequirementInput?: string;
+      initialRequirementInputKind?: string;
+    };
+
+    expect(initialRequirement).toBe(prdPath);
+    expect(taskContext.initialRequirementInput).toBe(prdPath);
+    expect(taskContext.initialRequirementInputKind).toBe("prd_path");
+    expect(taskContext.latestInput).toBe(prdPath);
+  });
+
+  it("treats a markdown filename-only input as prd_path", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "aegisflow-agent-"));
+    tempDirs.push(root);
+    const projectDir = path.join(root, "project");
+    await mkdir(projectDir, { recursive: true });
+    await writeProjectWorkflowConfig(projectDir);
+    const agent = new IntakeAgent(root);
+
+    await agent.handleUserInput("修复登录报错");
+    await agent.handleUserInput("");
+    await agent.handleUserInput(projectDir);
+    await agent.handleUserInput("");
+
+    const runtime = (agent as unknown as {
+      runtime?: {
+        taskState: { taskId: string };
+        projectConfig: { artifactDir: string };
+      };
+    }).runtime;
+    const taskId = runtime?.taskState.taskId ?? "";
+    const prdFilename = "input-prd.md";
+    await writeFile(
+      path.join(
+        runtime?.projectConfig.artifactDir ?? "",
+        "tasks",
+        taskId,
+        prdFilename,
+      ),
+      "# bare filename prd",
+      "utf8",
+    );
+
+    const lines = await agent.handleUserInput(prdFilename);
+
+    const taskContext = JSON.parse(
+      await readFile(
+        path.join(
+          runtime?.projectConfig.artifactDir ?? "",
+          "tasks",
+          taskId,
+          "runtime",
+          "task-context.json",
+        ),
+        "utf8",
+      ),
+    ) as {
+      initialRequirementInput?: string;
+      initialRequirementInputKind?: string;
+    };
+
+    expect(lines).toContain(`已记录 PRD 路径：${prdFilename}`);
+    expect(taskContext.initialRequirementInput).toBe(prdFilename);
+    expect(taskContext.initialRequirementInputKind).toBe("prd_path");
+  });
+
+  it("treats filename-only markdown paths with spaces or parentheses as prd_path when the file exists", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "aegisflow-agent-"));
+    tempDirs.push(root);
+    const projectDir = path.join(root, "project");
+    await mkdir(projectDir, { recursive: true });
+    await writeProjectWorkflowConfig(projectDir);
+    const agent = new IntakeAgent(root);
+
+    await agent.handleUserInput("修复登录报错");
+    await agent.handleUserInput("");
+    await agent.handleUserInput(projectDir);
+    await agent.handleUserInput("");
+
+    const runtime = (agent as unknown as {
+      runtime?: {
+        taskState: { taskId: string };
+        projectConfig: { artifactDir: string };
+      };
+    }).runtime;
+    const taskId = runtime?.taskState.taskId ?? "";
+    const prdFilename = "需求说明 (最终).md";
+    await writeFile(
+      path.join(
+        runtime?.projectConfig.artifactDir ?? "",
+        "tasks",
+        taskId,
+        prdFilename,
+      ),
+      "# final prd",
+      "utf8",
+    );
+
+    const lines = await agent.handleUserInput(prdFilename);
+
+    const taskContext = JSON.parse(
+      await readFile(
+        path.join(
+          runtime?.projectConfig.artifactDir ?? "",
+          "tasks",
+          taskId,
+          "runtime",
+          "task-context.json",
+        ),
+        "utf8",
+      ),
+    ) as {
+      initialRequirementInput?: string;
+      initialRequirementInputKind?: string;
+    };
+
+    expect(lines).toContain(`已记录 PRD 路径：${prdFilename}`);
+    expect(taskContext.initialRequirementInput).toBe(prdFilename);
+    expect(taskContext.initialRequirementInputKind).toBe("prd_path");
+  });
+
+  it("keeps natural-language sentences ending with markdown filenames as text", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "aegisflow-agent-"));
+    tempDirs.push(root);
+    const projectDir = path.join(root, "project");
+    await mkdir(projectDir, { recursive: true });
+    await writeProjectWorkflowConfig(projectDir);
+    const agent = new IntakeAgent(root);
+
+    await agent.handleUserInput("修复登录报错");
+    await agent.handleUserInput("");
+    await agent.handleUserInput(projectDir);
+    await agent.handleUserInput("");
+
+    const runtime = (agent as unknown as {
+      runtime?: {
+        taskState: { taskId: string };
+        projectConfig: { artifactDir: string };
+      };
+    }).runtime;
+    const taskId = runtime?.taskState.taskId ?? "";
+    const textInput = "把默认导出文件名改成 report.md";
+
+    const lines = await agent.handleUserInput(textInput);
+
+    const taskContext = JSON.parse(
+      await readFile(
+        path.join(
+          runtime?.projectConfig.artifactDir ?? "",
+          "tasks",
+          taskId,
+          "runtime",
+          "task-context.json",
+        ),
+        "utf8",
+      ),
+    ) as {
+      initialRequirementInput?: string;
+      initialRequirementInputKind?: string;
+    };
+
+    expect(lines).toContain("已记录详细需求说明。");
+    expect(taskContext.initialRequirementInput).toBe(textInput);
+    expect(taskContext.initialRequirementInputKind).toBe("text");
   });
 
   it("returns to artifact path input when relative artifact creation fails after project dir is known", async () => {
@@ -525,10 +764,10 @@ describe("IntakeAgent", () => {
     expect(failureLines).toHaveLength(1);
     expect(failureLines[0]).toContain("失败摘要：工件目录初始化失败。");
     expect(retryLines).toContain(`工件目录已创建：${path.join(projectDir, "retry-artifacts")}`);
-    expect(retryLines).toContain("请输入完整需求；如果沿用当前草稿，直接回车即可。");
+    expect(retryLines).toContain("推荐 workflow：bugfix-workflow");
   });
 
-  it("keeps the latest collected description when retrying with empty input", async () => {
+  it("keeps the requirement title when retrying project workflow loading", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "aegisflow-agent-"));
     tempDirs.push(root);
     const projectDir = path.join(root, "project");
@@ -546,10 +785,7 @@ describe("IntakeAgent", () => {
 
     await agent.handleUserInput("调整页面样式");
     await agent.handleUserInput("");
-    await agent.handleUserInput(projectDir);
-    const failedRetryLines = await agent.handleUserInput(
-      "调整审批权限规则和角色访问控制",
-    );
+    const failedRetryLines = await agent.handleUserInput(projectDir);
 
     expect(failedRetryLines).toHaveLength(1);
     expect(failedRetryLines[0]).toContain("失败摘要：读取项目 workflow 配置失败。");
@@ -575,8 +811,8 @@ describe("IntakeAgent", () => {
     const retryLines = await agent.handleUserInput(projectDir);
 
     expect(retryLines).toContain(`目标项目目录已确认：${projectDir}`);
-    expect(retryLines).toContain("推荐 workflow：permission-rule-workflow");
-    expect(retryLines).not.toContain("推荐 workflow：ui-adjustment-workflow");
+    expect(retryLines).toContain("推荐 workflow：ui-adjustment-workflow");
+    expect(retryLines).not.toContain("推荐 workflow：permission-rule-workflow");
   });
 
   it("returns to project directory input and recomputes the default artifact path after workflow config load failure", async () => {
@@ -599,8 +835,7 @@ describe("IntakeAgent", () => {
 
     await agent.handleUserInput("修复登录报错");
     await agent.handleUserInput("");
-    await agent.handleUserInput(invalidProjectDir);
-    const failedLines = await agent.handleUserInput("补充错误复现条件");
+    const failedLines = await agent.handleUserInput(invalidProjectDir);
     const retryLines = await agent.handleUserInput(validProjectDir);
 
     expect(failedLines).toHaveLength(1);
@@ -610,7 +845,7 @@ describe("IntakeAgent", () => {
       `工件目录已创建：${path.resolve(validProjectDir, ".aegisflow", "artifacts")}`,
     );
     expect(retryLines).toContain("推荐 workflow：bugfix-workflow");
-    expect(retryLines).not.toContain(`需求已记录：${validProjectDir}`);
+    expect(retryLines).not.toContain(`已记录需求标题：${validProjectDir}`);
   });
 
   it("blocks resume commands during draft collection without discarding the current draft", async () => {
@@ -639,7 +874,6 @@ describe("IntakeAgent", () => {
     await agent.handleUserInput("修复登录报错");
     await agent.handleUserInput("");
     await agent.handleUserInput(projectDir);
-    await agent.handleUserInput("");
     await agent.handleUserInput("n");
     const lines = await agent.handleUserInput("1abc");
 
@@ -666,8 +900,7 @@ describe("IntakeAgent", () => {
 
     await agent.handleUserInput("修复登录报错");
     await agent.handleUserInput("");
-    await agent.handleUserInput(projectDir);
-    const lines = await agent.handleUserInput("");
+    const lines = await agent.handleUserInput(projectDir);
 
     expect(lines).toHaveLength(1);
     expect(lines[0]).toContain("!!! 执行错误 !!!");
@@ -705,8 +938,7 @@ describe("IntakeAgent", () => {
 
     await agent.handleUserInput("调整列表排序规则");
     await agent.handleUserInput("");
-    await agent.handleUserInput(projectDir);
-    const lines = await agent.handleUserInput("");
+    const lines = await agent.handleUserInput(projectDir);
 
     expect(lines).toHaveLength(1);
     expect(lines[0]).toContain("失败摘要：读取项目 workflow 配置失败。");
@@ -740,8 +972,7 @@ describe("IntakeAgent", () => {
 
     await agent.handleUserInput("新增一个构建步骤");
     await agent.handleUserInput("");
-    await agent.handleUserInput(projectDir);
-    const lines = await agent.handleUserInput("");
+    const lines = await agent.handleUserInput(projectDir);
 
     expect(lines).toHaveLength(1);
     expect(lines[0]).toContain("失败摘要：读取项目 workflow 配置失败。");
@@ -783,8 +1014,7 @@ describe("IntakeAgent", () => {
 
     await agent.handleUserInput("修复登录报错");
     await agent.handleUserInput("");
-    await agent.handleUserInput(projectDir);
-    const lines = await agent.handleUserInput("");
+    const lines = await agent.handleUserInput(projectDir);
 
     expect(lines).toEqual([]);
     expect(receivedErrors).toHaveLength(1);
@@ -822,8 +1052,7 @@ describe("IntakeAgent", () => {
 
     await agent.handleUserInput("调整审批权限规则和角色访问控制");
     await agent.handleUserInput("");
-    await agent.handleUserInput(projectDir);
-    const lines = await agent.handleUserInput("");
+    const lines = await agent.handleUserInput(projectDir);
 
     expect(lines).toContain("推荐 workflow：permission-rule-workflow");
   });

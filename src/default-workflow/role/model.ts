@@ -184,6 +184,9 @@ function buildRoleExecutionPrompt(
     `- cwd: ${context.cwd}`,
     `- workflowProfileId: ${context.projectConfig.workflowProfileId}`,
     `- workflowProfileLabel: ${context.projectConfig.workflowProfileLabel}`,
+    context.initialRequirementInputKind
+      ? `- initialRequirementInputKind: ${context.initialRequirementInputKind}`
+      : "",
     "",
     context.phase === "clarify" && !isClarifyFinalPrdGeneration
       ? [

@@ -22,6 +22,7 @@ import type {
   WorkflowSelection,
 } from "../shared/types";
 import { DefaultRoleRegistry, JsonlEventLogger } from "./dependencies";
+import { buildInitialRequirementArtifact } from "../workflow/clarify-artifacts";
 import {
   loadProjectRoleExecutorConfig,
   loadProjectWorkflowCatalog,
@@ -35,7 +36,10 @@ export interface BuildNewRuntimeInput {
   workflowPhases: WorkflowPhaseConfig[];
   workflowProfileId?: string;
   workflowProfileLabel?: string;
-  description: string;
+  requirementTitle?: string;
+  initialRequirementInput?: string;
+  initialRequirementInputKind?: "text" | "prd_path";
+  description?: string;
 }
 
 export interface BuildResumeRuntimeInput {
@@ -52,16 +56,30 @@ export interface RuntimeBuildResult {
 export async function buildRuntimeForNewTask(
   input: BuildNewRuntimeInput,
 ): Promise<RuntimeBuildResult> {
+  const requirementTitle =
+    input.requirementTitle?.trim() || input.description?.trim() || "";
+  const shouldUseLegacyDescriptionAsInitialRequirement =
+    !input.requirementTitle &&
+    typeof input.description === "string" &&
+    input.description.trim().length > 0 &&
+    !input.initialRequirementInput;
+  const initialRequirementInput =
+    input.initialRequirementInput?.trim() ||
+    (shouldUseLegacyDescriptionAsInitialRequirement
+      ? input.description?.trim()
+      : undefined);
+
   await validateRuntimeInput(
     input.projectDir,
     input.artifactDir,
     input.workflow,
     input.workflowPhases,
+    requirementTitle,
   );
 
   const runtimeId = createRuntimeId();
   const title = createTaskTitle(
-    input.description,
+    requirementTitle,
     `${input.workflow.taskType ?? input.workflow.name ?? "workflow"}_task`,
   );
   const taskId = await createNextTaskId(input.artifactDir, title);
@@ -115,15 +133,34 @@ export async function buildRuntimeForNewTask(
   const persistedContext: PersistedTaskContext = {
     taskId,
     title,
-    description: input.description,
+    description: requirementTitle,
+    requirementTitle,
+    initialRequirementInput,
+    initialRequirementInputKind:
+      initialRequirementInput
+        ? input.initialRequirementInputKind ?? "text"
+        : undefined,
+    awaitingInitialRequirement: !initialRequirementInput,
     createdAt: Date.now(),
     lastRuntimeId: runtimeId,
-    latestInput: input.description,
+    latestInput: initialRequirementInput,
     projectConfig,
   };
 
   // Runtime 初始化完成后先把上下文和初始快照落盘，后续 run/resume 才能安全恢复。
   await artifactManager.initializeTask(taskId);
+  if (initialRequirementInput) {
+    await artifactManager.saveArtifact(taskId, {
+      key: "initial-requirement",
+      phase: "clarify",
+      roleName: "clarifier",
+      title: "initial-requirement",
+      content: buildInitialRequirementArtifact(
+        initialRequirementInput,
+        persistedContext.initialRequirementInputKind ?? "text",
+      ),
+    });
+  }
   await artifactManager.saveTaskContext(persistedContext);
   await artifactManager.saveTaskState(taskState);
 
@@ -146,6 +183,7 @@ export async function buildRuntimeForResume(
     input.projectConfig.artifactDir,
     input.projectConfig.workflow,
     input.projectConfig.workflowPhases,
+    input.persistedContext.requirementTitle ?? input.persistedContext.description,
   );
 
   // 恢复必须基于持久化工件重建新的 Runtime，不能复用旧进程内存。
@@ -251,6 +289,7 @@ async function validateRuntimeInput(
   artifactDir: string,
   workflow: WorkflowSelection,
   workflowPhases?: WorkflowPhaseConfig[],
+  requirementTitle?: string,
 ): Promise<void> {
   const resolvedProjectDir = path.resolve(projectDir);
   const resolvedArtifactDir = path.resolve(artifactDir);
@@ -266,6 +305,10 @@ async function validateRuntimeInput(
 
   if (!workflowPhases || workflowPhases.length === 0) {
     throw new Error("Workflow phases are missing or invalid.");
+  }
+
+  if (!requirementTitle || requirementTitle.trim().length === 0) {
+    throw new Error("Requirement title is missing or invalid.");
   }
 
   // 这里提前校验 phase 结构，避免 Runtime 启动后才在 Workflow 内部暴露配置缺口。

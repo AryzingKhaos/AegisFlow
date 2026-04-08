@@ -38,6 +38,7 @@ import {
 } from "./intent";
 import { initializeIntakeModel } from "./model";
 import { formatWorkflowEventForCli } from "./output";
+import { buildInitialRequirementArtifact } from "../workflow/clarify-artifacts";
 import {
   createIntakeErrorViewFromUnknown,
   formatIntakeErrorForCli,
@@ -47,13 +48,14 @@ import {
 type PendingStep =
   | "confirm_workflow"
   | "select_workflow"
-  | "collect_description"
+  | "collect_initial_requirement"
   | "collect_project_dir"
   | "collect_artifact_dir";
 
 interface DraftTask {
-  description?: string;
-  initialDescriptionHint?: string;
+  requirementTitle?: string;
+  initialRequirementInput?: string;
+  initialRequirementInputKind?: "text" | "prd_path";
   artifactInput?: string;
   workflow?: ReturnType<typeof createWorkflowSelection>;
   workflowCatalog?: ProjectWorkflowCatalog;
@@ -97,7 +99,7 @@ export class IntakeAgent {
     return [
       "AegisFlow Intake CLI 已启动。",
       `模型初始化完成：${this.modelBootstrap.config.model} @ ${this.modelBootstrap.config.baseUrl}`,
-      "开始新任务时会先确认工件目录设置：绝对路径会立即创建，默认目录或相对路径会在确认目标项目目录后创建。工件目录就绪后再收集需求，并从项目的 .aegisflow/aegisproject.yaml 推荐 workflow。",
+      "开始新任务时会先收集需求标题（不需要详细描述），再确认工件目录、目标项目目录和 workflow；任务目录创建后，才会继续收集详细描述或 PRD。",
       "如需恢复未完成任务，可输入“恢复任务”或“继续执行”。",
     ];
   }
@@ -264,7 +266,7 @@ export class IntakeAgent {
     if (
       !input &&
       this.pendingStep !== "confirm_workflow" &&
-      this.pendingStep !== "collect_description" &&
+      this.pendingStep !== "collect_initial_requirement" &&
       this.pendingStep !== "collect_project_dir" &&
       this.pendingStep !== "collect_artifact_dir"
     ) {
@@ -324,8 +326,8 @@ export class IntakeAgent {
         return ["请回答 y/n，或输入 是/否。直接回车等同于 y。"];
       case "select_workflow":
         return this.selectWorkflowFromUserInput(input);
-      case "collect_description":
-        return this.collectDescription(input);
+      case "collect_initial_requirement":
+        return this.collectInitialRequirement(input);
       case "collect_project_dir":
         return this.collectProjectDir(input);
       case "collect_artifact_dir":
@@ -335,14 +337,14 @@ export class IntakeAgent {
     }
   }
 
-  private async startDraftTask(initialDescriptionHint: string): Promise<string[]> {
+  private async startDraftTask(requirementTitle: string): Promise<string[]> {
     this.draft = {
-      initialDescriptionHint,
+      requirementTitle,
     };
     this.pendingStep = "collect_artifact_dir";
 
     return this.buildArtifactDirPromptLines(
-      "请先提供工件保存目录。绝对路径会立即创建；默认目录或相对路径会在确认目标项目目录后创建。工件目录就绪后，再描述需求并选择 workflow。",
+      `已记录需求标题：${requirementTitle}`,
     );
   }
 
@@ -364,27 +366,9 @@ export class IntakeAgent {
 
     this.applySelectedWorkflow(selectedWorkflow);
     this.pendingStep = undefined;
-    return this.initializeRuntimeAndStartTask(
+    return this.bootstrapRuntimeForInitialRequirement(
       `已切换为 workflow：${selectedWorkflow.name}。`,
     );
-  }
-
-  private async collectDescription(input: string): Promise<string[]> {
-    if (!this.draft?.artifactDir) {
-      return this.resetDraftWithMessage("缺少工件目录，请重新开始任务。");
-    }
-
-    const description =
-      input || this.draft.description?.trim() || this.draft.initialDescriptionHint?.trim() || "";
-
-    if (!description) {
-      return [
-        "请先描述任务需求；如果要引用已有 PRD 或计划文件，请直接写出工件目录中的 md 文件路径。",
-      ];
-    }
-
-    this.draft.description = description;
-    return this.promptForProjectDirOrRecommendWorkflow(`需求已记录：${description}`);
   }
 
   private async collectProjectDir(input: string): Promise<string[]> {
@@ -422,15 +406,6 @@ export class IntakeAgent {
     }
 
     try {
-      if (!this.draft.description) {
-        this.pendingStep = "collect_description";
-        return [
-          `目标项目目录已确认：${projectDir}`,
-          ...artifactDirLines,
-          ...this.buildDescriptionPromptLines("工件目录已就绪，可以开始描述需求。"),
-        ];
-      }
-
       return this.recommendWorkflowForDraft(projectDir, [
         `目标项目目录已确认：${projectDir}`,
         ...artifactDirLines,
@@ -466,11 +441,6 @@ export class IntakeAgent {
       }
 
       this.draft.artifactDir = artifactDir;
-      if (!this.draft.description) {
-        this.pendingStep = "collect_description";
-        return this.buildDescriptionPromptLines(`工件目录已创建：${artifactDir}`);
-      }
-
       return this.promptForProjectDirOrRecommendWorkflow(`工件目录已创建：${artifactDir}`);
     }
 
@@ -493,11 +463,6 @@ export class IntakeAgent {
       }
 
       this.draft.artifactDir = artifactDir;
-      if (!this.draft.description) {
-        this.pendingStep = "collect_description";
-        return this.buildDescriptionPromptLines(`工件目录已创建：${artifactDir}`);
-      }
-
       return this.promptForProjectDirOrRecommendWorkflow(`工件目录已创建：${artifactDir}`);
     }
 
@@ -508,10 +473,10 @@ export class IntakeAgent {
     ];
   }
 
-  private async initializeRuntimeAndStartTask(prefix?: string): Promise<string[]> {
+  private async bootstrapRuntimeForInitialRequirement(prefix?: string): Promise<string[]> {
     if (
       !this.draft?.projectDir ||
-      !this.draft.description ||
+      !this.draft.requirementTitle ||
       !this.draft.workflow ||
       !this.draft.selectedWorkflow ||
       !this.draft.artifactDir
@@ -532,7 +497,7 @@ export class IntakeAgent {
         workflowPhases: this.draft.selectedWorkflow.phases,
         workflowProfileId: this.draft.selectedWorkflow.name,
         workflowProfileLabel: this.draft.selectedWorkflow.name,
-        description: this.draft.description,
+        requirementTitle: this.draft.requirementTitle,
       });
     } catch (error) {
       return this.emitUnknownIntakeError(error, {
@@ -547,34 +512,99 @@ export class IntakeAgent {
     // 在工件目录之外额外保存最近可恢复任务索引，确保后续 CLI 会话
     // 也能准确恢复使用自定义工件目录的任务。
     await this.saveResumeIndex(buildResult.persistedContext);
+    this.pendingStep = "collect_initial_requirement";
 
+    const taskDir = path.join(
+      buildResult.runtime.projectConfig.artifactDir,
+      "tasks",
+      buildResult.runtime.taskState.taskId,
+    );
     const lines = [
       ...(prefix ? [prefix] : []),
       `Runtime 初始化成功：${buildResult.runtime.runtimeId}`,
       `任务 workflow：${buildResult.runtime.projectConfig.workflow.name}`,
       `流程编排：${buildResult.runtime.projectConfig.workflowProfileLabel} (${formatWorkflowPhases(buildResult.runtime.projectConfig.workflowPhases)})`,
       `工件目录：${buildResult.runtime.projectConfig.artifactDir}`,
+      `任务目录已创建：${taskDir}`,
       ...buildResult.capabilityWarnings.map((warning) => `说明：${warning}`),
+    ];
+
+    return [
+      ...lines,
+      ...this.buildInitialRequirementPromptLines(
+        "现在可以提供详细描述，或者提供 PRD 文件路径。",
+      ),
+    ];
+  }
+
+  private async collectInitialRequirement(input: string): Promise<string[]> {
+    if (!this.draft?.requirementTitle || !this.runtime || !this.persistedContext) {
+      return this.resetDraftWithMessage("缺少初始需求记录上下文，请重新开始任务。");
+    }
+
+    const trimmedInput = input.trim();
+
+    if (!trimmedInput) {
+      return this.buildInitialRequirementPromptLines(
+        "请提供详细描述，或者直接输入 PRD 文件路径。",
+      );
+    }
+
+    const taskId = this.runtime.taskState.taskId;
+    const taskDir = path.join(
+      this.runtime.projectConfig.artifactDir,
+      "tasks",
+      taskId,
+    );
+    const inputKind = await detectInitialRequirementInputKind(trimmedInput, taskDir);
+
+    try {
+      await this.runtime.artifactManager.saveArtifact(taskId, {
+        key: "initial-requirement",
+        phase: "clarify",
+        roleName: "clarifier",
+        title: "initial-requirement",
+        content: buildInitialRequirementArtifact(trimmedInput, inputKind),
+      });
+
+      const persistedContext = await this.runtime.artifactManager.loadTaskContext(taskId);
+      persistedContext.initialRequirementInput = trimmedInput;
+      persistedContext.initialRequirementInputKind = inputKind;
+      persistedContext.awaitingInitialRequirement = false;
+      persistedContext.latestInput = trimmedInput;
+      await this.runtime.artifactManager.saveTaskContext(persistedContext);
+      this.persistedContext = persistedContext;
+      this.draft.initialRequirementInput = trimmedInput;
+      this.draft.initialRequirementInputKind = inputKind;
+    } catch (error) {
+      return this.emitUnknownIntakeError(error, {
+        summary: "写入 initial-requirement 失败。",
+        source: "intake",
+      });
+    }
+
+    this.pendingStep = undefined;
+    await this.flushDraftDebugEventsToRuntime();
+
+    const lines = [
+      inputKind === "prd_path"
+        ? `已记录 PRD 路径：${trimmedInput}`
+        : "已记录详细需求说明。",
     ];
 
     lines.push(
       ...(await this.dispatchRuntimeEvent(
         "init_task",
-        this.draft.description,
+        trimmedInput,
         {
-          title: buildResult.runtime.taskState.title,
-          workflow: buildResult.runtime.projectConfig.workflow,
-          workflowProfileLabel:
-            buildResult.runtime.projectConfig.workflowProfileLabel,
-          workflowPhases: buildResult.runtime.projectConfig.workflowPhases,
+          title: this.runtime.taskState.title,
+          workflow: this.runtime.projectConfig.workflow,
+          workflowProfileLabel: this.runtime.projectConfig.workflowProfileLabel,
+          workflowPhases: this.runtime.projectConfig.workflowPhases,
         },
       )),
     );
-    // init_task 和 start_task 分开发送，
-    // 让“完成初始化”和“正式执行”成为两个可观察的状态节点。
-    lines.push(
-      ...(await this.dispatchRuntimeEvent("start_task", this.draft.description)),
-    );
+    lines.push(...(await this.dispatchRuntimeEvent("start_task", trimmedInput)));
 
     this.draft = undefined;
 
@@ -620,6 +650,20 @@ export class IntakeAgent {
     this.attachRuntime(buildResult.runtime, buildResult.persistedContext);
     await this.flushDraftDebugEventsToRuntime();
     await this.saveResumeIndex(buildResult.persistedContext);
+
+    if (buildResult.persistedContext.awaitingInitialRequirement) {
+      this.draft = this.restoreDraftFromPersistedContext(buildResult.persistedContext);
+      this.pendingStep = "collect_initial_requirement";
+
+      return [
+        `Runtime 已重建：${buildResult.runtime.runtimeId}`,
+        `恢复任务：${buildResult.runtime.taskState.taskId}`,
+        ...buildResult.capabilityWarnings.map((warning) => `说明：${warning}`),
+        ...this.buildInitialRequirementPromptLines(
+          "当前任务目录已恢复，继续提供详细描述或 PRD 文件路径后才会正式启动 workflow。",
+        ),
+      ];
+    }
 
     const lines = [
       `Runtime 已重建：${buildResult.runtime.runtimeId}`,
@@ -883,7 +927,7 @@ export class IntakeAgent {
     }
 
     this.pendingStep = undefined;
-    return this.initializeRuntimeAndStartTask(
+    return this.bootstrapRuntimeForInitialRequirement(
       `已确认 workflow：${this.draft.selectedWorkflow.name}。`,
     );
   }
@@ -897,8 +941,9 @@ export class IntakeAgent {
     }
 
     this.draft = {
-      description: this.draft.description,
-      initialDescriptionHint: this.draft.initialDescriptionHint,
+      requirementTitle: this.draft.requirementTitle,
+      initialRequirementInput: this.draft.initialRequirementInput,
+      initialRequirementInputKind: this.draft.initialRequirementInputKind,
       artifactInput: this.draft.artifactInput,
       workflowCatalog: this.draft.workflowCatalog,
       projectDir: this.draft.projectDir,
@@ -933,32 +978,31 @@ export class IntakeAgent {
   private buildArtifactDirPromptLines(prefix: string): string[] {
     return [
       prefix,
+      "当前阶段只需要一个简短标题，不需要详细描述。",
       "请提供工件保存目录。",
+      "绝对路径会立即创建；默认目录或相对路径会在确认目标项目目录后创建。",
       "直接回车将使用目标项目目录下的默认目录 .aegisflow/artifacts。",
       "如果输入相对路径，也会基于目标项目目录解析。",
     ];
   }
 
-  private buildDescriptionPromptLines(prefix: string): string[] {
-    if (!this.draft?.artifactDir) {
-      return this.resetDraftWithMessage("缺少工件目录，请重新开始任务。");
+  private buildInitialRequirementPromptLines(prefix: string): string[] {
+    if (!this.runtime || !this.draft?.artifactDir) {
+      return this.resetDraftWithMessage("缺少任务目录上下文，请重新开始任务。");
     }
 
-    const descriptionHint =
-      this.draft.description?.trim() || this.draft.initialDescriptionHint?.trim();
+    const taskDir = path.join(
+      this.draft.artifactDir,
+      "tasks",
+      this.runtime.taskState.taskId,
+    );
 
     return [
       prefix,
-      `工件目录：${this.draft.artifactDir}`,
-      "如需引用已有 PRD、计划文档或其他前置工件，请先放入该目录，再描述任务。",
-      ...(descriptionHint
-        ? [
-            `当前已记录的需求草稿：${descriptionHint}`,
-            "请输入完整需求；如果沿用当前草稿，直接回车即可。",
-          ]
-        : [
-            "请描述本次任务需求；如有需要，可直接写出工件目录中的 md 文件路径。",
-          ]),
+      `需求标题：${this.draft.requirementTitle ?? ""}`,
+      `任务目录：${taskDir}`,
+      "如果你要引用已有 PRD，请先把文件放进该任务目录，再直接输入 PRD 文件路径。",
+      "这一轮输入会写入 tasks/<taskId>/artifacts/clarify/initial-requirement.md，然后才会开始执行 workflow。",
     ];
   }
 
@@ -992,14 +1036,14 @@ export class IntakeAgent {
     projectDir: string,
     prefixLines: string[] = [],
   ): Promise<string[]> {
-    if (!this.draft?.description) {
-      return this.resetDraftWithMessage("缺少任务需求，请重新开始任务。");
+    if (!this.draft?.requirementTitle) {
+      return this.resetDraftWithMessage("缺少需求标题，请重新开始任务。");
     }
 
     try {
       const workflowCatalog = await loadProjectWorkflowCatalog(projectDir);
       const recommendation = recommendProjectWorkflow(
-        this.draft.description,
+        this.draft.requirementTitle,
         workflowCatalog.workflows,
       );
 
@@ -1037,8 +1081,30 @@ export class IntakeAgent {
     this.pendingStep = "collect_project_dir";
     return [
       prefix,
+      "下一步会基于需求标题和项目中的 workflow 配置给出推荐。",
       "请提供目标项目目录。直接回车、输入“默认”或“当前目录”将使用当前工作目录。",
     ];
+  }
+
+  private restoreDraftFromPersistedContext(
+    persistedContext: PersistedTaskContext,
+  ): DraftTask {
+    return {
+      requirementTitle:
+        persistedContext.requirementTitle ?? persistedContext.description,
+      initialRequirementInput: persistedContext.initialRequirementInput,
+      initialRequirementInputKind: persistedContext.initialRequirementInputKind,
+      projectDir: persistedContext.projectConfig.projectDir,
+      artifactDir: persistedContext.projectConfig.artifactDir,
+      workflow: persistedContext.projectConfig.workflow,
+      selectedWorkflow: {
+        name: persistedContext.projectConfig.workflow.name,
+        description: persistedContext.projectConfig.workflow.description,
+        phases: persistedContext.projectConfig.workflowPhases.map((phase) => ({
+          ...phase,
+        })),
+      },
+    };
   }
 
   private getResumeIndexPath(): string {
@@ -1119,6 +1185,52 @@ function normalizeArtifactInput(input: string): string | undefined {
 
 function isAbsoluteArtifactInput(artifactInput?: string): boolean {
   return Boolean(artifactInput && path.isAbsolute(artifactInput.trim()));
+}
+
+async function detectInitialRequirementInputKind(
+  input: string,
+  taskDir: string,
+): Promise<"text" | "prd_path"> {
+  const normalizedInput = input.trim();
+
+  if (
+    normalizedInput.length === 0 ||
+    normalizedInput.includes("\n") ||
+    !/\.(md|markdown)$/i.test(normalizedInput)
+  ) {
+    return "text";
+  }
+
+  if (
+    normalizedInput.includes("/") ||
+    normalizedInput.includes("\\") ||
+    normalizedInput.startsWith(".")
+  ) {
+    return "prd_path";
+  }
+
+  if (isBareMarkdownFilename(normalizedInput)) {
+    const bareFilenamePath = path.join(taskDir, normalizedInput);
+    const fileExists = await fs.readFile(bareFilenamePath, "utf8").then(
+      () => true,
+      () => false,
+    );
+
+    if (fileExists) {
+      return "prd_path";
+    }
+  }
+
+  return "text";
+}
+
+function isBareMarkdownFilename(input: string): boolean {
+  return (
+    !input.includes("/") &&
+    !input.includes("\\") &&
+    !input.startsWith(".") &&
+    /\.(md|markdown)$/i.test(input)
+  );
 }
 
 function resolveWorkflowSelection(

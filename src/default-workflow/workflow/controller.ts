@@ -23,6 +23,9 @@ import {
   normalizeFinalArtifactMarkdown,
   resolveFinalArtifactDefinition,
 } from "./final-artifact";
+import {
+  buildInitialClarifyDialogueArtifact,
+} from "./clarify-artifacts";
 
 interface WorkflowControllerDependencies {
   taskState: TaskState;
@@ -34,6 +37,8 @@ interface WorkflowControllerDependencies {
 }
 
 export class DefaultWorkflowController implements WorkflowController {
+  private resumeInputCurrentStep?: string;
+
   public constructor(
     private readonly dependencies: WorkflowControllerDependencies,
   ) {}
@@ -67,6 +72,7 @@ export class DefaultWorkflowController implements WorkflowController {
 
     try {
       this.assertTaskId(taskId);
+      this.resumeInputCurrentStep = undefined;
       await this.saveLatestInput(input);
       // run 表示正式进入主流程，启动时清空旧恢复点，
       // 避免把上一次暂停信息错误带入新的执行轮次。
@@ -125,6 +131,7 @@ export class DefaultWorkflowController implements WorkflowController {
       this.dependencies.roleRegistry.activate?.(roleName) ??
       this.dependencies.roleRegistry.get(roleName);
     const phase = options?.phase ?? this.dependencies.taskState.currentPhase;
+    const taskContext = await this.loadTaskContextSafe();
     // Workflow 只把最小执行上下文传给角色，
     // 不再把 TaskState、latestInput 或完整 ArtifactManager 暴露到 Role 层。
     const context = {
@@ -136,6 +143,7 @@ export class DefaultWorkflowController implements WorkflowController {
         phase,
       ),
       projectConfig: this.dependencies.projectConfig,
+      initialRequirementInputKind: taskContext?.initialRequirementInputKind,
       roleCapabilityProfile: role.capabilityProfile,
       emitVisibleOutput: options?.workflowEvents
         ? async (output: RoleVisibleOutput) => {
@@ -367,6 +375,7 @@ export class DefaultWorkflowController implements WorkflowController {
       this.assertTaskId(taskId);
       const previousStatus = this.dependencies.taskState.status;
       const resumePoint = this.dependencies.taskState.resumeFrom;
+      this.resumeInputCurrentStep = resumePoint?.currentStep;
       const shouldPersistLatestInput = this.shouldUseResumeInput(
         previousStatus,
         consumeInputForPhase,
@@ -425,6 +434,8 @@ export class DefaultWorkflowController implements WorkflowController {
       return workflowEvents;
     } catch (error) {
       return this.failWithError(error, "任务恢复失败。", workflowEvents);
+    } finally {
+      this.resumeInputCurrentStep = undefined;
     }
   }
 
@@ -603,6 +614,7 @@ export class DefaultWorkflowController implements WorkflowController {
   ): Promise<void> {
     const taskId = this.dependencies.taskState.taskId;
     const artifactReader = this.dependencies.artifactManager.createArtifactReader(taskId);
+    const taskContext = await this.loadTaskContextSafe();
     const existingInitialRequirement = await artifactReader.get(
       `${phaseConfig.name}/initial-requirement`,
     );
@@ -610,21 +622,17 @@ export class DefaultWorkflowController implements WorkflowController {
       `${phaseConfig.name}/clarify-dialogue`,
     );
 
-    if (!existingInitialRequirement && this.hasUsableInput(input)) {
-      await this.saveNamedArtifact(
-        workflowEvents,
-        phaseConfig,
-        "initial-requirement",
-        "initial-requirement",
-        buildInitialRequirementArtifact(input ?? ""),
-      );
-    } else if (!existingInitialRequirement) {
+    if (!existingInitialRequirement) {
       throw new Error(
         "Clarify execution context is incomplete: missing clarify/initial-requirement artifact.",
       );
     }
 
-    if (!existingDialogue && existingInitialRequirement) {
+    if (
+      !existingDialogue &&
+      this.hasUsableInput(input) &&
+      this.resumeInputCurrentStep === "clarify_waiting_user_answer"
+    ) {
       throw new Error(
         "Clarify execution context is incomplete: missing clarify/clarify-dialogue artifact.",
       );
@@ -1335,14 +1343,6 @@ function createArtifactTitle(
   artifactIndex: number,
 ): string {
   return `${phase}-${roleName}-${artifactIndex + 1}`;
-}
-
-function buildInitialRequirementArtifact(input: string): string {
-  return ["# Initial Requirement", "", input.trim()].join("\n");
-}
-
-function buildInitialClarifyDialogueArtifact(): string {
-  return ["# Clarify Dialogue", ""].join("\n");
 }
 
 function appendClarifyDialogueQuestion(

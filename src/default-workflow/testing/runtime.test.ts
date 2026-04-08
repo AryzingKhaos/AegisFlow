@@ -795,6 +795,7 @@ describe("workflow runtime", () => {
       lastRuntimeId: "runtime_pause_case",
       projectConfig,
     });
+    await seedInitialRequirementArtifact(artifactManager, taskState.taskId, "补齐 API 细节");
 
     const logger = new MemoryEventLogger();
     const controller = new DefaultWorkflowController({
@@ -906,6 +907,7 @@ describe("workflow runtime", () => {
       lastRuntimeId: "runtime_explore_visibility_case",
       projectConfig,
     });
+    await seedInitialRequirementArtifact(artifactManager, taskState.taskId, "补齐 API 细节");
 
     const controller = new DefaultWorkflowController({
       taskState,
@@ -987,6 +989,7 @@ describe("workflow runtime", () => {
       lastRuntimeId: "runtime_clarify_reinjection_case",
       projectConfig,
     });
+    await seedInitialRequirementArtifact(artifactManager, taskState.taskId, "补齐 API 细节");
 
     const observedCalls: Array<{
       input: string;
@@ -1067,6 +1070,138 @@ describe("workflow runtime", () => {
     expect(observedCalls[2]?.clarifyDialogue).toContain("接口返回 code 还要兼容旧版");
   });
 
+  it("fails clarify immediately when initial-requirement is missing", async () => {
+    const root = await createTempProject();
+    const projectDir = path.join(root, "project");
+    const artifactDir = path.join(root, "artifacts");
+    await mkdir(projectDir, { recursive: true });
+
+    const workflowPhases: WorkflowPhaseConfig[] = [
+      {
+        name: "clarify",
+        hostRole: "clarifier",
+        needApproval: false,
+      },
+    ];
+    const projectConfig = createProjectConfig({
+      projectDir,
+      artifactDir,
+      workflow: createWorkflowSelection("feature_change"),
+      workflowPhases,
+    });
+    const artifactManager = new FileArtifactManager(projectConfig);
+    const taskState = createInitialTaskState(
+      "task_clarify_missing_initial_requirement_case",
+      "clarify_missing_initial_requirement_case",
+      workflowPhases,
+    );
+    await artifactManager.initializeTask(taskState.taskId);
+    await artifactManager.saveTaskContext({
+      taskId: taskState.taskId,
+      title: taskState.title,
+      description: "补齐 API 细节",
+      createdAt: Date.now(),
+      lastRuntimeId: "runtime_clarify_missing_initial_requirement_case",
+      projectConfig,
+    });
+
+    const controller = new DefaultWorkflowController({
+      taskState,
+      projectConfig,
+      eventEmitter: new EventEmitter(),
+      eventLogger: new MemoryEventLogger(),
+      artifactManager,
+      roleRegistry: new TestRoleRegistry({
+        clarifier: createRole("clarifier", async () => ({
+          summary: "clarifier should not run",
+          artifacts: [],
+          metadata: {
+            decision: "ready_for_prd",
+          },
+        })),
+      }),
+    });
+
+    const events = await controller.run(taskState.taskId, "补齐 API 细节");
+
+    expect(taskState.status).toBe(TaskStatus.FAILED);
+    expect(events.at(-2)?.type).toBe("error");
+    expect(events.at(-2)?.metadata?.error).toContain(
+      "missing clarify/initial-requirement artifact",
+    );
+  });
+
+  it("passes initialRequirementInputKind into clarify role context", async () => {
+    const root = await createTempProject();
+    const projectDir = path.join(root, "project");
+    const artifactDir = path.join(root, "artifacts");
+    await mkdir(projectDir, { recursive: true });
+
+    const workflowPhases: WorkflowPhaseConfig[] = [
+      {
+        name: "clarify",
+        hostRole: "clarifier",
+        needApproval: false,
+      },
+    ];
+    const projectConfig = createProjectConfig({
+      projectDir,
+      artifactDir,
+      workflow: createWorkflowSelection("feature_change"),
+      workflowPhases,
+    });
+    const artifactManager = new FileArtifactManager(projectConfig);
+    const taskState = createInitialTaskState(
+      "task_clarify_input_kind_case",
+      "clarify_input_kind_case",
+      workflowPhases,
+    );
+    await artifactManager.initializeTask(taskState.taskId);
+    await artifactManager.saveTaskContext({
+      taskId: taskState.taskId,
+      title: taskState.title,
+      description: "prd path case",
+      requirementTitle: "prd path case",
+      initialRequirementInput: "input-prd.md",
+      initialRequirementInputKind: "prd_path",
+      awaitingInitialRequirement: false,
+      createdAt: Date.now(),
+      lastRuntimeId: "runtime_clarify_input_kind_case",
+      latestInput: "input-prd.md",
+      projectConfig,
+    });
+    await seedInitialRequirementArtifact(artifactManager, taskState.taskId, "input-prd.md", "prd_path");
+
+    let observedKind: string | undefined;
+    let observedInitialRequirement: string | undefined;
+    const controller = new DefaultWorkflowController({
+      taskState,
+      projectConfig,
+      eventEmitter: new EventEmitter(),
+      eventLogger: new MemoryEventLogger(),
+      artifactManager,
+      roleRegistry: new TestRoleRegistry({
+        clarifier: createRole("clarifier", async (_input, context) => {
+          observedKind = context.initialRequirementInputKind;
+          observedInitialRequirement = await context.artifacts.get("clarify/initial-requirement");
+
+          return {
+            summary: "clarifier ready-for-prd",
+            artifacts: [],
+            metadata: {
+              decision: "ready_for_prd",
+            },
+          };
+        }),
+      }),
+    });
+
+    await controller.run(taskState.taskId, "input-prd.md");
+
+    expect(observedKind).toBe("prd_path");
+    expect(observedInitialRequirement).toBe("input-prd.md");
+  });
+
   it("normalizes clarify final-prd before saving and exposing it to the next phase", async () => {
     const root = await createTempProject();
     const projectDir = path.join(root, "project");
@@ -1106,6 +1241,7 @@ describe("workflow runtime", () => {
       lastRuntimeId: "runtime_clarify_final_markdown_case",
       projectConfig,
     });
+    await seedInitialRequirementArtifact(artifactManager, taskState.taskId, "生成 PRD");
 
     const controller = new DefaultWorkflowController({
       taskState,
@@ -1340,6 +1476,7 @@ describe("workflow runtime", () => {
       lastRuntimeId: "runtime_multi_phase_artifact_input",
       projectConfig,
     });
+    await seedInitialRequirementArtifact(artifactManager, taskState.taskId, "多来源工件输入");
 
     const controller = new DefaultWorkflowController({
       taskState,
@@ -1445,6 +1582,7 @@ describe("workflow runtime", () => {
       lastRuntimeId: "runtime_single_phase_artifact_input",
       projectConfig,
     });
+    await seedInitialRequirementArtifact(artifactManager, taskState.taskId, "单来源工件输入");
 
     const controller = new DefaultWorkflowController({
       taskState,
@@ -1544,6 +1682,7 @@ describe("workflow runtime", () => {
       lastRuntimeId: "runtime_default_artifact_input_fallback",
       projectConfig,
     });
+    await seedInitialRequirementArtifact(artifactManager, taskState.taskId, "默认来源回退");
 
     const controller = new DefaultWorkflowController({
       taskState,
@@ -1645,6 +1784,7 @@ describe("workflow runtime", () => {
       lastRuntimeId: "runtime_artifact_input_order",
       projectConfig,
     });
+    await seedInitialRequirementArtifact(artifactManager, taskState.taskId, "来源顺序");
 
     const controller = new DefaultWorkflowController({
       taskState,
@@ -1733,6 +1873,7 @@ describe("workflow runtime", () => {
       lastRuntimeId: "runtime_clarify_invalid_decision",
       projectConfig,
     });
+    await seedInitialRequirementArtifact(artifactManager, taskState.taskId, "补齐 API 细节");
 
     const controller = new DefaultWorkflowController({
       taskState,
@@ -1794,6 +1935,7 @@ describe("workflow runtime", () => {
       lastRuntimeId: "runtime_clarify_invalid_final_prd",
       projectConfig,
     });
+    await seedInitialRequirementArtifact(artifactManager, taskState.taskId, "补齐 API 细节");
 
     let callCount = 0;
     const controller = new DefaultWorkflowController({
@@ -1876,6 +2018,7 @@ describe("workflow runtime", () => {
       lastRuntimeId: "runtime_clarify_missing_dialogue_case",
       projectConfig,
     });
+    await seedInitialRequirementArtifact(artifactManager, taskState.taskId, "补齐 API 细节");
 
     const controller = new DefaultWorkflowController({
       taskState,
@@ -2094,6 +2237,7 @@ describe("workflow runtime", () => {
       lastRuntimeId: "runtime_fail_case",
       projectConfig,
     });
+    await seedInitialRequirementArtifact(artifactManager, taskState.taskId, "失败用例");
 
     const logger = new MemoryEventLogger();
     const roleRegistry = new TrackableRoleRegistry({
@@ -2479,6 +2623,28 @@ function createCapabilityProfile(name: RoleName): RoleCapabilityProfile {
     allowedActions: [name],
     focus: name,
   };
+}
+
+async function seedInitialRequirementArtifact(
+  artifactManager: FileArtifactManager,
+  taskId: string,
+  content: string,
+  kind: "text" | "prd_path" = "text",
+): Promise<void> {
+  await artifactManager.saveArtifact(taskId, {
+    key: "initial-requirement",
+    phase: "clarify",
+    roleName: "clarifier",
+    title: "initial-requirement",
+    content,
+  });
+
+  const taskContext = await artifactManager.loadTaskContext(taskId);
+  taskContext.initialRequirementInput = content;
+  taskContext.initialRequirementInputKind = kind;
+  taskContext.awaitingInitialRequirement = false;
+  taskContext.latestInput = content;
+  await artifactManager.saveTaskContext(taskContext);
 }
 
 async function createTempProject(): Promise<string> {

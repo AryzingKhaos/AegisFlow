@@ -149,6 +149,8 @@ export interface WorkflowEvent {
   metadata?: Record<string, unknown>;
 }
 
+export type InitialRequirementInputKind = "text" | "prd_path";
+
 export type TaskDebugEventType =
   | "user_input"
   | "intake_message"
@@ -179,6 +181,10 @@ export interface PersistedTaskContext {
   taskId: string;
   title: string;
   description: string;
+  requirementTitle?: string;
+  initialRequirementInput?: string;
+  initialRequirementInputKind?: InitialRequirementInputKind;
+  awaitingInitialRequirement?: boolean;
   createdAt: number;
   lastRuntimeId: string;
   latestInput?: string;
@@ -235,6 +241,7 @@ export interface ExecutionContext {
   cwd: string;
   artifacts: ArtifactReader;
   projectConfig: ProjectConfig;
+  initialRequirementInputKind?: InitialRequirementInputKind;
   roleCapabilityProfile: RoleCapabilityProfile;
   emitVisibleOutput?: (output: RoleVisibleOutput) => Promise<void>;
   emitDebugEvent?: (event: Omit<TaskDebugEvent, "taskId" | "timestamp"> & {
