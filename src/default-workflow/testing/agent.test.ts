@@ -395,7 +395,7 @@ describe("IntakeAgent", () => {
     const lines = await agent.handleUserInput(projectDir);
 
     expect(lines).toContain(`目标项目目录已确认：${projectDir}`);
-    expect(lines).toContain(`推荐 workflow：bugfix-workflow`);
+    expect(lines).toContain(`【推荐 workflow】：bugfix-workflow`);
     expect(lines.some((line) => line.includes("推荐理由："))).toBe(true);
     expect(lines).toContain(
       "流程编排：clarify -> explore -> plan -> build -> review -> test-design -> unit-test -> test",
@@ -479,7 +479,7 @@ describe("IntakeAgent", () => {
     const confirmationLines = await agent.handleUserInput(artifactDir);
     const artifactDirEntries = await readdir(root);
 
-    expect(artifactPromptLines).toContain("请提供工件保存目录。");
+    expect(artifactPromptLines).toContain("请提供【工件保存目录】。");
     expect(artifactPromptLines).toContain("直接回车将使用目标项目目录下的默认目录 .aegisflow/artifacts。");
     expect(artifactDirEntries).toContain("custom-artifacts");
     expect(confirmationLines).toContain(`工件目录已创建：${artifactDir}`);
@@ -505,7 +505,7 @@ describe("IntakeAgent", () => {
 
     expect(workflowLines).toContain(`目标项目目录已确认：${projectDir}`);
     expect(workflowLines).toContain(`工件目录已创建：${path.resolve(projectDir, ".aegisflow", "artifacts")}`);
-    expect(workflowLines).toContain("推荐 workflow：bugfix-workflow");
+    expect(workflowLines).toContain("【推荐 workflow】：bugfix-workflow");
     expect(bootstrapLines).toContain(
       `任务目录已创建：${path.resolve(projectDir, ".aegisflow", "artifacts", "tasks", taskId ?? "")}`,
     );
@@ -764,7 +764,7 @@ describe("IntakeAgent", () => {
     expect(failureLines).toHaveLength(1);
     expect(failureLines[0]).toContain("失败摘要：工件目录初始化失败。");
     expect(retryLines).toContain(`工件目录已创建：${path.join(projectDir, "retry-artifacts")}`);
-    expect(retryLines).toContain("推荐 workflow：bugfix-workflow");
+    expect(retryLines).toContain("【推荐 workflow】：bugfix-workflow");
   });
 
   it("keeps the requirement title when retrying project workflow loading", async () => {
@@ -811,8 +811,8 @@ describe("IntakeAgent", () => {
     const retryLines = await agent.handleUserInput(projectDir);
 
     expect(retryLines).toContain(`目标项目目录已确认：${projectDir}`);
-    expect(retryLines).toContain("推荐 workflow：ui-adjustment-workflow");
-    expect(retryLines).not.toContain("推荐 workflow：permission-rule-workflow");
+    expect(retryLines).toContain("【推荐 workflow】：ui-adjustment-workflow");
+    expect(retryLines).not.toContain("【推荐 workflow】：permission-rule-workflow");
   });
 
   it("returns to project directory input and recomputes the default artifact path after workflow config load failure", async () => {
@@ -844,7 +844,7 @@ describe("IntakeAgent", () => {
     expect(retryLines).toContain(
       `工件目录已创建：${path.resolve(validProjectDir, ".aegisflow", "artifacts")}`,
     );
-    expect(retryLines).toContain("推荐 workflow：bugfix-workflow");
+    expect(retryLines).toContain("【推荐 workflow】：bugfix-workflow");
     expect(retryLines).not.toContain(`已记录需求标题：${validProjectDir}`);
   });
 
@@ -1054,7 +1054,7 @@ describe("IntakeAgent", () => {
     await agent.handleUserInput("");
     const lines = await agent.handleUserInput(projectDir);
 
-    expect(lines).toContain("推荐 workflow：permission-rule-workflow");
+    expect(lines).toContain("【推荐 workflow】：permission-rule-workflow");
   });
 });
 
