@@ -458,7 +458,7 @@ export class IntakeAgent {
           summary: "工件目录初始化失败。",
           location: `路径：${artifactDir}`,
           source: "intake",
-          nextAction: "请重新提供工件保存目录；如果要使用默认目录，直接回车即可。",
+          nextAction: "请重新提供【工件保存目录】；如果要使用默认目录，直接回车即可。",
         });
       }
 
@@ -469,7 +469,7 @@ export class IntakeAgent {
     this.pendingStep = "collect_project_dir";
     return [
       "已记录工件目录设置。默认目录或相对路径需要基于目标项目目录解析。",
-      "请先提供目标项目目录。直接回车、输入“默认”或“当前目录”将使用当前工作目录。",
+      "请先提供目标【项目目录】。直接回车、输入“默认”或“当前目录”将使用当前工作目录。",
     ];
   }
 
@@ -546,7 +546,7 @@ export class IntakeAgent {
 
     if (!trimmedInput) {
       return this.buildInitialRequirementPromptLines(
-        "请提供详细描述，或者直接输入 PRD 文件路径。",
+        "请提供需求的详细描述，或者直接输入 PRD 文件路径。",
       );
     }
 
