@@ -36,5 +36,6 @@
 | `0.1.0` | `default-workflow-intake-ui-theme-refinement` | [0.1.0/default-workflow-intake-ui-theme-refinement-prd.md](0.1.0/default-workflow-intake-ui-theme-refinement-prd.md) |
 | `0.1.0` | `default-workflow-intake-output-structure-separation` | [0.1.0/default-workflow-intake-output-structure-separation-prd.md](0.1.0/default-workflow-intake-output-structure-separation-prd.md) |
 | `0.1.0` | `default-workflow-intake-codex-style-output-stream` | [0.1.0/default-workflow-intake-codex-style-output-stream-prd.md](0.1.0/default-workflow-intake-codex-style-output-stream-prd.md) |
+| `0.1.0` | `default-workflow-intake-codex-exec-failure-main-screen` | [0.1.0/default-workflow-intake-codex-exec-failure-main-screen-prd.md](0.1.0/default-workflow-intake-codex-exec-failure-main-screen-prd.md) |
 | `0.1.0` | `default-workflow-task-debug-transcript-codex-io-only` | [0.1.0/default-workflow-task-debug-transcript-codex-io-only-prd.md](0.1.0/default-workflow-task-debug-transcript-codex-io-only-prd.md) |
 | `0.1.0` | `default-workflow-intake-initial-requirement-bootstrap` | [0.1.0/default-workflow-intake-initial-requirement-bootstrap-prd.md](0.1.0/default-workflow-intake-initial-requirement-bootstrap-prd.md) |

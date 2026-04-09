@@ -1,3 +1,5 @@
+import { isCodexExecInterruption } from "../default-workflow/intake/error-view";
+import type { IntakeErrorView } from "../default-workflow/intake/error-view";
 import type { CliViewModel, UiBlock } from "./ui-model";
 
 export interface MainOutputEntry {
@@ -7,8 +9,13 @@ export interface MainOutputEntry {
 
 export type OutputRegionLayout =
   | {
+      kind: "failure_main_screen";
+      error: IntakeErrorView;
+    }
+  | {
       kind: "main_stream";
       entries: MainOutputEntry[];
+      title?: string;
     }
   | {
       kind: "process";
@@ -25,6 +32,10 @@ export function buildOutputRegionLayout(
   const flattenedIntermediateLines = flattenIntermediateLines(
     viewModel.intermediateLines,
   );
+  const shouldShowFailureMainScreen = isCodexExecInterruption(
+    viewModel.currentError,
+    viewModel.taskStatus,
+  );
   const processDetailLines = flattenedIntermediateLines.slice(
     Math.max(0, flattenedIntermediateLines.length - maxVisibleIntermediateLines),
   );
@@ -34,11 +45,20 @@ export function buildOutputRegionLayout(
   );
 
   return [
+    ...(shouldShowFailureMainScreen && viewModel.currentError
+      ? [
+          {
+            kind: "failure_main_screen" as const,
+            error: viewModel.currentError,
+          },
+        ]
+      : []),
     ...(mainOutputEntries.length > 0
       ? [
           {
             kind: "main_stream" as const,
             entries: mainOutputEntries,
+            title: shouldShowFailureMainScreen ? "历史输出" : undefined,
           },
         ]
       : []),

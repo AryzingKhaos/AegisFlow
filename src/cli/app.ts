@@ -1,7 +1,10 @@
 declare const require: (id: string) => unknown;
 
 import { IntakeAgent } from "../default-workflow";
-import { createIntakeErrorViewFromUnknown } from "../default-workflow/intake/error-view";
+import {
+  createIntakeErrorViewFromUnknown,
+  isCodexExecInterruption,
+} from "../default-workflow/intake/error-view";
 import type { WorkflowEvent } from "../default-workflow/shared/types";
 import {
   appendIntakeError,
@@ -181,7 +184,8 @@ function IntakeInkApp(): unknown {
       viewModel,
       isBusy,
     }),
-    viewModel.currentError
+    viewModel.currentError &&
+    !isCodexExecInterruption(viewModel.currentError, viewModel.taskStatus)
       ? h(ErrorPanel, {
           error: viewModel.currentError,
         })
@@ -439,10 +443,17 @@ function renderOutputRegion(
   },
 ): unknown {
   switch (region.kind) {
+    case "failure_main_screen":
+      return h(FailureMainScreen, {
+        key: input.key,
+        error: region.error,
+        marginTop: input.marginTop,
+      });
     case "main_stream":
       return h(MainOutputStream, {
         key: input.key,
         entries: region.entries,
+        title: region.title,
         marginTop: input.marginTop,
       });
     case "process":
@@ -495,6 +506,7 @@ function ContentSection(input: {
 
 function MainOutputStream(input: {
   entries: MainOutputEntry[];
+  title?: string;
   marginTop: number;
 }): unknown {
   return h(
@@ -503,6 +515,16 @@ function MainOutputStream(input: {
       marginTop: input.marginTop,
       flexDirection: "column",
     },
+    input.title
+      ? h(
+          Text,
+          {
+            color: THEME.text.dim,
+            bold: true,
+          },
+          input.title,
+        )
+      : null,
     ...input.entries.map((entry, index) =>
       h(MainOutputEntryBlock, {
         key: entry.block.id,
@@ -510,6 +532,70 @@ function MainOutputStream(input: {
         isLast: index === input.entries.length - 1,
       }),
     ),
+  );
+}
+
+function FailureMainScreen(input: {
+  error: NonNullable<CliViewModel["currentError"]>;
+  marginTop: number;
+}): unknown {
+  const children = [
+    h(
+      Text,
+      {
+        key: "failure-title",
+        color: THEME.error.title,
+        bold: true,
+      },
+      "最终失败信息",
+    ),
+    h(
+      Text,
+      {
+        key: "failure-summary",
+        color: THEME.text.primary,
+        bold: true,
+      },
+      input.error.summary,
+    ),
+    h(LabeledBlock, {
+      key: "failure-reason",
+      label: "[失败原因]",
+      value: input.error.reason,
+      color: THEME.error.body,
+      bold: true,
+    }),
+  ];
+
+  if (input.error.location) {
+    children.push(
+      h(LabeledBlock, {
+        key: "failure-location",
+        label: "[失败位置]",
+        value: input.error.location,
+        color: THEME.text.secondary,
+      }),
+    );
+  }
+
+  if (input.error.nextAction) {
+    children.push(
+      h(LabeledBlock, {
+        key: "failure-next-action",
+        label: "[下一步建议]",
+        value: input.error.nextAction,
+        color: THEME.chrome.appAccentSoft,
+      }),
+    );
+  }
+
+  return h(
+    Box,
+    {
+      marginTop: input.marginTop,
+      flexDirection: "column",
+    },
+    ...children,
   );
 }
 

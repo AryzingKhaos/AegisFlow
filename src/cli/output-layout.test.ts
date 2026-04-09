@@ -33,6 +33,38 @@ describe("cli output layout", () => {
     });
   });
 
+  it("promotes codex exec interruption into a failure main screen ahead of historical output", () => {
+    const layout = buildOutputRegionLayout(
+      createViewModel({
+        taskStatus: "failed",
+        currentError: {
+          summary: "阶段执行失败。",
+          reason: "Role agent execution failed: executor transport error: socket hang up",
+          location: "阶段：build | 角色：builder",
+          nextAction: "检查网络连通性、provider/transport 配置与认证环境；修正后可恢复或重新发起任务。",
+          source: "workflow",
+        },
+        skeletonBlocks: [createBlock("task-end", 9, "system")],
+      }),
+      6,
+    );
+
+    expect(layout.map((region) => region.kind)).toEqual([
+      "failure_main_screen",
+      "main_stream",
+    ]);
+    expect(layout[0]).toMatchObject({
+      kind: "failure_main_screen",
+      error: {
+        summary: "阶段执行失败。",
+      },
+    });
+    expect(layout[1]).toMatchObject({
+      kind: "main_stream",
+      title: "历史输出",
+    });
+  });
+
   it("renders only the main stream when the task is not running", () => {
     expect(
       buildOutputRegionLayout(
@@ -55,6 +87,44 @@ describe("cli output layout", () => {
     ).toEqual([]);
 
     expect(buildOutputRegionLayout(createViewModel({ taskStatus: "completed" }), 6)).toEqual([]);
+  });
+
+  it("does not enter failure main screen mode for non-executor failures", () => {
+    const layout = buildOutputRegionLayout(
+      createViewModel({
+        taskStatus: "failed",
+        currentError: {
+          summary: "阶段执行失败。",
+          reason: "artifactReady=false: builder 未产出可落盘工件。",
+          location: "阶段：build | 角色：builder",
+          nextAction: "检查当前阶段是否按要求产出了可落盘工件，然后重新执行或恢复任务。",
+          source: "workflow",
+        },
+        skeletonBlocks: [createBlock("task-end", 9, "system")],
+      }),
+      6,
+    );
+
+    expect(layout.map((region) => region.kind)).toEqual(["main_stream"]);
+  });
+
+  it("does not enter failure main screen mode for generic provider wording without executor context", () => {
+    const layout = buildOutputRegionLayout(
+      createViewModel({
+        taskStatus: "failed",
+        currentError: {
+          summary: "阶段执行失败。",
+          reason: "provider 配置缺失：请检查 .aegisflow/aegisproject.yaml。",
+          location: "配置文件：/tmp/demo/.aegisflow/aegisproject.yaml",
+          nextAction: "修正 .aegisflow/aegisproject.yaml 中的配置后重新发起任务。",
+          source: "workflow",
+        },
+        skeletonBlocks: [createBlock("task-end", 9, "system")],
+      }),
+      6,
+    );
+
+    expect(layout.map((region) => region.kind)).toEqual(["main_stream"]);
   });
 
   it("keeps process summary visible and truncates detail lines to the latest six lines", () => {
@@ -100,7 +170,12 @@ function createViewModel(
   overrides: Partial<
     Pick<
       CliViewModel,
-      "currentPhase" | "taskStatus" | "finalBlocks" | "skeletonBlocks" | "intermediateLines"
+      | "currentPhase"
+      | "taskStatus"
+      | "currentError"
+      | "finalBlocks"
+      | "skeletonBlocks"
+      | "intermediateLines"
     >
   > = {},
 ): CliViewModel {
@@ -110,6 +185,7 @@ function createViewModel(
     currentPhase: overrides.currentPhase ?? "clarify",
     taskStatus: overrides.taskStatus ?? "running",
     inputHint: "输入需求或任务控制指令",
+    currentError: overrides.currentError,
     nextBlockOrder: 0,
     finalBlocks: overrides.finalBlocks ?? [],
     skeletonBlocks: overrides.skeletonBlocks ?? [],

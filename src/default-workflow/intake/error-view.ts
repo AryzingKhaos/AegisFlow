@@ -78,6 +78,19 @@ export function formatIntakeErrorForCli(error: IntakeErrorView): string[] {
   return [lines.join("\n")];
 }
 
+export function isCodexExecInterruption(
+  error: IntakeErrorView | undefined,
+  taskStatus?: string,
+): boolean {
+  if (!error || taskStatus !== "failed" || error.source !== "workflow") {
+    return false;
+  }
+
+  const normalized = `${error.summary}\n${error.reason}\n${error.location ?? ""}`.toLowerCase();
+
+  return hasCodexExecChainContext(normalized);
+}
+
 function resolveUnknownErrorMessage(error: unknown): string {
   if (error instanceof Error) {
     return error.message;
@@ -117,6 +130,57 @@ function inferNextAction(
   source: IntakeErrorView["source"],
 ): string {
   const normalized = reason.toLowerCase();
+  const hasCodexExecContext =
+    source === "workflow" && hasCodexExecChainContext(normalized);
+
+  if (
+    hasCodexExecContext &&
+    normalized.includes("executor timed out") ||
+    hasCodexExecContext &&
+    normalized.includes("timed out") ||
+    hasCodexExecContext &&
+    normalized.includes("timeout")
+  ) {
+    return "检查网络、执行环境与超时配置；必要时适当提高超时时间后恢复或重新发起任务。";
+  }
+
+  if (
+    hasCodexExecContext &&
+    normalized.includes("token") ||
+    hasCodexExecContext &&
+    normalized.includes("quota") ||
+    hasCodexExecContext &&
+    normalized.includes("额度") ||
+    hasCodexExecContext &&
+    normalized.includes("insufficient_quota") ||
+    hasCodexExecContext &&
+    normalized.includes("rate limit")
+  ) {
+    return "检查模型额度、token 配额或账单状态；恢复可用额度后再恢复或重新发起任务。";
+  }
+
+  if (
+    hasCodexExecContext &&
+    normalized.includes("transport") ||
+    hasCodexExecContext &&
+    normalized.includes("provider") ||
+    hasCodexExecContext &&
+    normalized.includes("authentication") ||
+    hasCodexExecContext &&
+    normalized.includes("api key") ||
+    hasCodexExecContext &&
+    normalized.includes("network") ||
+    hasCodexExecContext &&
+    normalized.includes("socket") ||
+    hasCodexExecContext &&
+    normalized.includes("econn") ||
+    hasCodexExecContext &&
+    normalized.includes("enotfound") ||
+    hasCodexExecContext &&
+    normalized.includes("eai_again")
+  ) {
+    return "检查网络连通性、provider/transport 配置与认证环境；修正后可恢复或重新发起任务。";
+  }
 
   if (
     normalized.includes(".aegisflow/aegisproject.yaml") ||
@@ -164,4 +228,14 @@ function extractConfigPath(values: string[]): string | undefined {
   }
 
   return undefined;
+}
+
+function hasCodexExecChainContext(normalized: string): boolean {
+  return (
+    normalized.includes("role agent execution failed:") ||
+    normalized.includes("role agent execution failed.") ||
+    normalized.includes("executor transport error") ||
+    normalized.includes("executor timed out") ||
+    normalized.includes("codex exited with code")
+  );
 }
