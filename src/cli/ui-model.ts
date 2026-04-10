@@ -155,7 +155,7 @@ export function applyWorkflowEventToCliViewModel(
   }
 
   const skeletonBlock = createUiBlock(nextViewModel, "skeleton", {
-    title: buildSkeletonTitle(event),
+    title: `[${buildSkeletonTitle(event)}]`,
     body: normalizeCliText(event.message),
     tone: "system",
   });

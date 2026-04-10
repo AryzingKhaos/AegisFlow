@@ -99,8 +99,7 @@ export class IntakeAgent {
     return [
       "AegisFlow Intake CLI 已启动。",
       `模型初始化完成：${this.modelBootstrap.config.model} @ ${this.modelBootstrap.config.baseUrl}`,
-      "开始新任务时会先收集需求标题（不需要详细描述），再确认工件目录、目标项目目录和 workflow；任务目录创建后，才会继续收集详细描述或 PRD。",
-      "如需恢复未完成任务，可输入“恢复任务”或“继续执行”。",
+      "开始新任务时会先收集需求标题（不需要详细描述）。如需恢复未完成任务，可输入“恢复任务”或“继续执行”。",
     ];
   }
 
