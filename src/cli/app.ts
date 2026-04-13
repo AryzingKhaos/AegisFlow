@@ -71,7 +71,7 @@ interface InkModuleShape {
 }
 
 const h = React.createElement;
-const MAX_VISIBLE_PROCESS_DETAIL_LINES = 20;
+const MAX_VISIBLE_PROCESS_DETAIL_LINES = 50;
 const SPINNER_FRAMES = ["-", "\\", "|", "/"];
 
 export async function runCliApp(): Promise<unknown> {
